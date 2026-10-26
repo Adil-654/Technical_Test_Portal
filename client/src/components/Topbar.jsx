@@ -1,7 +1,18 @@
 
-import { Bell, Menu, Search, ChevronDown } from "lucide-react";
+import {
+  Bell,
+  Menu,
+  Search,
+  ChevronDown,
+  LogOut,
+} from "lucide-react";
 
-export default function Topbar({ activePage, setMobileOpen }) {
+export default function Topbar({
+  activePage,
+  setMobileOpen,
+  user,
+  onLogout,
+}) {
   return (
     <header className="sticky top-0 z-30 flex h-[76px] items-center justify-between gap-4 border-b border-slate-200/80 bg-white/90 px-4 backdrop-blur-xl sm:px-7 lg:px-9">
       <div className="flex min-w-0 items-center gap-3">
@@ -14,7 +25,9 @@ export default function Topbar({ activePage, setMobileOpen }) {
         </button>
 
         <div className="min-w-0">
-          <p className="truncate text-sm text-slate-500">Workspace / Admin</p>
+          <p className="truncate text-sm text-slate-500">
+            Workspace / Admin
+          </p>
           <h2 className="truncate text-lg font-bold text-slate-900">
             {activePage}
           </h2>
@@ -44,17 +57,38 @@ export default function Topbar({ activePage, setMobileOpen }) {
           <span className="absolute right-2 top-2 h-2 w-2 rounded-full border-2 border-white bg-rose-500" />
         </button>
 
-        <div className="h-8 w-px bg-slate-200" />
+        <div className="hidden h-8 w-px bg-slate-200 sm:block" />
 
-        <button className="flex items-center gap-2.5 text-left">
+        <div className="hidden items-center gap-2.5 text-left sm:flex">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 text-sm font-bold text-indigo-700">
-            A
+            {(user?.name || user?.email || "A")
+              .charAt(0)
+              .toUpperCase()}
           </div>
-          <div className="hidden sm:block">
-            <p className="text-sm font-semibold text-slate-800">Admin</p>
-            <p className="text-xs text-slate-500">Administrator</p>
+
+          <div className="hidden lg:block">
+            <p className="max-w-32 truncate text-sm font-semibold text-slate-800">
+              {user?.name || "Admin"}
+            </p>
+            <p className="text-xs text-slate-500">
+              Administrator
+            </p>
           </div>
-          <ChevronDown size={15} className="hidden text-slate-400 sm:block" />
+
+          <ChevronDown
+            size={15}
+            className="hidden text-slate-400 lg:block"
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={onLogout}
+          className="flex items-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2.5 text-sm font-semibold text-red-600 transition hover:border-red-300 hover:bg-red-50 sm:px-4"
+          title="Logout"
+        >
+          <LogOut size={17} />
+          <span>Logout</span>
         </button>
       </div>
     </header>

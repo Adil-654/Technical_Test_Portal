@@ -85,31 +85,32 @@ async function findStudentAttempt(attemptId, studentId) {
 
 /* ==================== List Published Tests ==================== */
 
+
 export async function getAvailableTests(req, res, next) {
   try {
     const now = new Date();
+    const studentId = req.user._id;
 
-    const tests = await Test.find({
-      status: "published",
-    })
+    // Return every published test, including upcoming and ended tests.
+    const tests = await Test.find({ status: "published" })
       .select(
-        "title description subject durationMinutes totalMarks startAt endAt attemptsAllowed questions"
+        "title description subject durationMinutes totalMarks startAt endAt attemptsAllowed questions status createdAt"
       )
       .populate("subject", "name code")
       .sort({ createdAt: -1 })
       .lean();
 
-    const studentId = req.user._id;
-
     const testIds = tests.map((test) => test._id);
 
-    const attempts = await TestAttempt.find({
-      student: studentId,
-      test: { $in: testIds },
-    })
-      .select("test attemptNumber status expiresAt")
-      .sort({ attemptNumber: -1 })
-      .lean();
+    const attempts = testIds.length
+      ? await TestAttempt.find({
+          student: studentId,
+          test: { $in: testIds },
+        })
+          .select("test attemptNumber status expiresAt")
+          .sort({ attemptNumber: -1 })
+          .lean()
+      : [];
 
     const attemptsByTest = new Map();
 
@@ -137,12 +138,30 @@ export async function getAvailableTests(req, res, next) {
           attempt.status === "expired"
       ).length;
 
-      const available =
-        isWithinSchedule(test, now) &&
-        completedAttempts < test.attemptsAllowed;
+      const startsInFuture =
+        Boolean(test.startAt) && now < new Date(test.startAt);
+
+      const hasEnded =
+        Boolean(test.endAt) && now > new Date(test.endAt);
+
+      const withinSchedule = !startsInFuture && !hasEnded;
+
+      const attemptsRemaining = Math.max(
+        0,
+        test.attemptsAllowed - completedAttempts
+      );
+
+      // A saved attempt may be resumed only if its deadline has not passed.
+      const canResume =
+        Boolean(inProgressAttempt) &&
+        new Date(inProgressAttempt.expiresAt) > now;
+
+      const isAvailable =
+        withinSchedule &&
+        attemptsRemaining > 0;
 
       return {
-        id: test._id,
+        id: String(test._id),
         title: test.title,
         description: test.description,
         subject: test.subject,
@@ -153,27 +172,26 @@ export async function getAvailableTests(req, res, next) {
         endAt: test.endAt,
         attemptsAllowed: test.attemptsAllowed,
         attemptsUsed: completedAttempts,
-        attemptsRemaining: Math.max(
-          0,
-          test.attemptsAllowed - completedAttempts
-        ),
-        isAvailable: available || Boolean(inProgressAttempt),
-        inProgressAttemptId: inProgressAttempt?._id || null,
-        startsInFuture: Boolean(
-          test.startAt && now < new Date(test.startAt)
-        ),
-        hasEnded: Boolean(test.endAt && now > new Date(test.endAt)),
+        attemptsRemaining,
+        startsInFuture,
+        hasEnded,
+        isAvailable: isAvailable || canResume,
+        inProgressAttemptId: canResume
+          ? String(inProgressAttempt._id)
+          : null,
       };
     });
 
     return res.status(200).json({
       success: true,
+      count: result.length,
       tests: result,
     });
   } catch (error) {
     next(error);
   }
 }
+
 
 /* ==================== Start or Resume an Attempt ==================== */
 

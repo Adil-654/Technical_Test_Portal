@@ -7,7 +7,12 @@ import {
   Routes,
   useNavigate,
 } from "react-router-dom";
-import { LoaderCircle } from "lucide-react";
+import {
+  LoaderCircle,
+  LogOut,
+  X,
+  AlertTriangle,
+} from "lucide-react";
 
 import api from "./services/api";
 
@@ -33,7 +38,6 @@ function LoadingScreen() {
           size={34}
           className="mx-auto animate-spin text-indigo-600"
         />
-
         <p className="mt-4 text-sm text-slate-500">
           Preparing TestPilot...
         </p>
@@ -70,6 +74,21 @@ function ProtectedRoute({ user, role, children }) {
 function AdminLayout({ user, onLogout }) {
   const [activePage, setActivePage] = useState("Overview");
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  async function confirmLogout() {
+    if (loggingOut) return;
+
+    setLoggingOut(true);
+
+    try {
+      await onLogout();
+    } finally {
+      setLoggingOut(false);
+      setShowLogoutConfirm(false);
+    }
+  }
 
   function renderPage() {
     switch (activePage) {
@@ -125,7 +144,7 @@ function AdminLayout({ user, onLogout }) {
           activePage={activePage}
           setMobileOpen={setMobileOpen}
           user={user}
-          onLogout={onLogout}
+          onLogout={() => setShowLogoutConfirm(true)}
         />
 
         <main className="p-4 sm:p-7 lg:p-9">
@@ -136,6 +155,78 @@ function AdminLayout({ user, onLogout }) {
           TestPilot · Technical Assessment Platform
         </footer>
       </div>
+
+      {/* Admin logout confirmation modal */}
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+          onClick={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !loggingOut
+            ) {
+              setShowLogoutConfirm(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-logout-title"
+            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <div className="mb-5 flex items-start justify-between">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 text-red-600">
+                <AlertTriangle size={25} />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                disabled={loggingOut}
+                aria-label="Close logout confirmation"
+                className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 disabled:opacity-50"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <h2
+              id="admin-logout-title"
+              className="text-xl font-bold text-slate-900"
+            >
+              Logout from Admin Panel?
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Are you sure you want to log out of TestPilot?
+              You will need to sign in again to access the
+              administrator dashboard.
+            </p>
+
+            <div className="mt-7 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                disabled={loggingOut}
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={confirmLogout}
+                disabled={loggingOut}
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <LogOut size={17} />
+                {loggingOut ? "Logging out..." : "Yes, Logout"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -202,7 +293,6 @@ function AppContent() {
 
   return (
     <Routes>
-      {/* Public login page */}
       <Route
         path="/login"
         element={
@@ -214,7 +304,6 @@ function AppContent() {
         }
       />
 
-      {/* Public student registration */}
       <Route
         path="/register"
         element={
@@ -226,7 +315,6 @@ function AppContent() {
         }
       />
 
-      {/* Administrator portal */}
       <Route
         path="/admin/*"
         element={
@@ -239,7 +327,6 @@ function AppContent() {
         }
       />
 
-      {/* Student portal with its own sidebar */}
       <Route
         path="/student/*"
         element={
@@ -252,7 +339,6 @@ function AppContent() {
         }
       />
 
-      {/* Home route */}
       <Route
         path="/"
         element={
@@ -263,7 +349,6 @@ function AppContent() {
         }
       />
 
-      {/* Unknown routes */}
       <Route
         path="*"
         element={
