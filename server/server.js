@@ -14,6 +14,7 @@ import authRoutes from "./routes/authRoutes.js";
 import studentRoutes from "./routes/studentRoutes.js";
 import dashboardRoutes from "./routes/dashboardRoutes.js";
 import questionRoutes from "./routes/questionRoutes.js";
+import studentAssessmentRoutes from "./routes/studentAssessmentRoutes.js";
 import testRoutes from "./routes/testRoutes.js";
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -45,6 +46,7 @@ app.use("/api/students", studentRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/tests", testRoutes);
+app.use("/api/student-assessments", studentAssessmentRoutes);
 app.use((req, res) => {
   res.status(404).json({
     success: false,
