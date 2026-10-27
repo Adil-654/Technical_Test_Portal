@@ -1,99 +1,112 @@
-
 import mongoose from "mongoose";
+
+const manualQuestionSchema = new mongoose.Schema(
+  {
+    questionText: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    type: {
+      type: String,
+      enum: ["MCQ", "TRUE_FALSE"],
+      default: "MCQ",
+    },
+    options: {
+      type: [String],
+      default: [],
+    },
+    correctAnswer: {
+      type: String,
+      required: true,
+    },
+    marks: {
+      type: Number,
+      required: true,
+      min: 1,
+      default: 1,
+    },
+    difficulty: {
+      type: String,
+      enum: ["easy", "medium", "hard"],
+      default: "medium",
+    },
+    explanation: {
+      type: String,
+      default: "",
+    },
+  },
+  { _id: true }
+);
 
 const testSchema = new mongoose.Schema(
   {
     title: {
       type: String,
-      required: [true, "Test title is required."],
+      required: true,
       trim: true,
       maxlength: 150,
     },
-
     description: {
       type: String,
-      trim: true,
-      maxlength: 1000,
       default: "",
+      maxlength: 1000,
     },
-
     subject: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
       required: true,
-      index: true,
     },
-
-    questions: {
-      type: [
-        {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: "Question",
-        },
-      ],
-      validate: {
-        validator(ids) {
-          return (
-            ids.length > 0 &&
-            ids.every((id) => mongoose.isValidObjectId(id)) &&
-            new Set(ids.map(String)).size === ids.length
-          );
-        },
-        message: "Select at least one unique question.",
+    questionIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Question",
       },
+    ],
+    manualQuestions: {
+      type: [manualQuestionSchema],
+      default: [],
     },
-
     durationMinutes: {
       type: Number,
       required: true,
       min: 1,
       max: 600,
+      default: 30,
     },
-
-    totalMarks: {
+    attemptsAllowed: {
       type: Number,
-      required: true,
       min: 1,
+      max: 10,
       default: 1,
     },
-
     startAt: {
       type: Date,
       default: null,
     },
-
     endAt: {
       type: Date,
       default: null,
     },
-
-    attemptsAllowed: {
-      type: Number,
-      default: 1,
-      min: 1,
-      max: 10,
-    },
-
     status: {
       type: String,
       enum: ["draft", "published", "closed"],
       default: "draft",
-      index: true,
     },
-
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      required: true,
+    },
+    questionCount: {
+      type: Number,
+      default: 0,
+    },
+    totalMarks: {
+      type: Number,
+      default: 0,
     },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-testSchema.index({ status: 1, startAt: 1, endAt: 1 });
-
-const Test = mongoose.model("Test", testSchema);
-
-export default Test;
+export default mongoose.model("Test", testSchema);

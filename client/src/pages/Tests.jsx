@@ -1,357 +1,388 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  AlertCircle,
-  BookOpen,
-  CalendarClock,
-  CheckCircle2,
-  Clock3,
-  FilePlus2,
-  FileText,
-  LoaderCircle,
-  Plus,
-  RefreshCw,
   Search,
+  RefreshCw,
+  ClipboardList,
+  Users,
+  CheckCircle2,
+  Clock,
+  Eye,
+  AlertCircle,
+  LoaderCircle,
+  CalendarDays,
+  BookOpen,
+  Plus,
   X,
+  Save,
+  Filter,
 } from "lucide-react";
-
+import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 
-const initialForm = {
+const EMPTY_FORM = {
   title: "",
   description: "",
   subject: "",
-  questionIds: [],
   durationMinutes: 30,
-  startAt: "",
-  endAt: "",
-  attemptsAllowed: 1,
+  questionIds: [],
+  scheduledAt: "",
 };
 
-function formatDate(date) {
-  if (!date) return "Not scheduled";
-
-  const parsed = new Date(date);
-
-  if (Number.isNaN(parsed.getTime())) return "Invalid date";
-
-  return parsed.toLocaleString();
-}
-
-function StatusBadge({ status }) {
-  const styles = {
-    draft: "bg-amber-50 text-amber-700 ring-amber-200",
-    published: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-    closed: "bg-slate-100 text-slate-600 ring-slate-200",
-  };
-
-  return (
-    <span
-      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 ring-inset ${
-        styles[status] || styles.draft
-      }`}
-    >
-      {status}
-    </span>
-  );
-}
-
 export default function Tests() {
+  const navigate = useNavigate();
+
   const [tests, setTests] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [questions, setQuestions] = useState([]);
 
-  const [loading, setLoading] = useState(true);
-  const [questionsLoading, setQuestionsLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [updatingId, setUpdatingId] = useState("");
-
-  const [modalOpen, setModalOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
   const [subjectFilter, setSubjectFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
-  const [form, setForm] = useState(initialForm);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [updatingId, setUpdatingId] = useState(null);
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
-  const loadTests = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [form, setForm] = useState(EMPTY_FORM);
 
-    try {
-      const response = await api.get("/tests", {
-        params: {
-          search: search.trim() || undefined,
-          status: statusFilter || undefined,
-          subject: subjectFilter || undefined,
-        },
-      });
-
-      setTests(response.data.tests || []);
-    } catch (err) {
-      setError(
-        err.response?.data?.message ||
-          "Unable to load tests. Please check your backend."
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [search, statusFilter, subjectFilter]);
-
-  const loadSubjects = useCallback(async () => {
+  const fetchSubjects = useCallback(async () => {
     try {
       const response = await api.get("/subjects", {
         params: { status: "active" },
       });
 
-      setSubjects(
-        (response.data.subjects || []).filter(
-          (subject) => subject.isActive !== false
-        )
-      );
+      const data = response.data;
+      const list = Array.isArray(data)
+        ? data
+        : data.subjects || data.data || [];
+
+      setSubjects(list);
     } catch (err) {
-      setError(
-        err.response?.data?.message ||
-          "Unable to load subjects."
-      );
+      console.error("Failed to load subjects:", err);
     }
   }, []);
 
-  useEffect(() => {
-    loadSubjects();
-  }, [loadSubjects]);
-
-  useEffect(() => {
-    loadTests();
-  }, [loadTests]);
-
-  useEffect(() => {
-    if (!modalOpen || !form.subject) {
-      setQuestions([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadQuestions() {
-      setQuestionsLoading(true);
-      setError("");
-
+  const fetchTests = useCallback(
+    async (showRefresh = false) => {
       try {
-        const response = await api.get("/questions", {
-          params: {
-            subject: form.subject,
-            status: "active",
-          },
-        });
+        if (showRefresh) setRefreshing(true);
+        else setLoading(true);
 
-        if (!cancelled) {
-          setQuestions(response.data.questions || []);
-        }
+        setError("");
+
+        const params = {};
+        if (search.trim()) params.search = search.trim();
+        if (subjectFilter) params.subject = subjectFilter;
+        if (statusFilter) params.status = statusFilter;
+
+        const response = await api.get("/tests", { params });
+        const data = response.data;
+        const list = Array.isArray(data)
+          ? data
+          : data.tests || data.data || [];
+
+        setTests(Array.isArray(list) ? list : []);
       } catch (err) {
-        if (!cancelled) {
-          setQuestions([]);
-          setError(
-            err.response?.data?.message ||
-              "Unable to load questions for this subject."
-          );
-        }
+        console.error("Failed to fetch tests:", err);
+        setError(
+          err.response?.data?.message ||
+            "Could not load assessments. Please try again."
+        );
       } finally {
-        if (!cancelled) setQuestionsLoading(false);
+        setLoading(false);
+        setRefreshing(false);
       }
+    },
+    [search, subjectFilter, statusFilter]
+  );
+
+  const fetchQuestions = useCallback(async () => {
+    try {
+      const response = await api.get("/questions", {
+        params: {
+          status: "active",
+          isActive: true,
+          subject: form.subject || undefined,
+        },
+      });
+
+      const data = response.data;
+      const list = Array.isArray(data)
+        ? data
+        : data.questions || data.data || [];
+
+      setQuestions(Array.isArray(list) ? list : []);
+    } catch (err) {
+      console.error("Failed to load questions:", err);
+      setCreateError(
+        err.response?.data?.message ||
+          "Could not load questions. Check your question-bank API."
+      );
     }
+  }, [form.subject]);
 
-    loadQuestions();
+  useEffect(() => {
+    fetchSubjects();
+  }, [fetchSubjects]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [modalOpen, form.subject]);
+  useEffect(() => {
+    const timeout = setTimeout(() => fetchTests(), 250);
+    return () => clearTimeout(timeout);
+  }, [fetchTests]);
 
-  function openCreateModal() {
-    setForm(initialForm);
-    setError("");
-    setNotice("");
-    setModalOpen(true);
-  }
+  useEffect(() => {
+    if (showCreateModal && form.subject) {
+      fetchQuestions();
+    } else {
+      setQuestions([]);
+    }
+  }, [showCreateModal, form.subject, fetchQuestions]);
 
-  function closeModal() {
+  const openCreateModal = () => {
+    setForm(EMPTY_FORM);
+    setQuestions([]);
+    setCreateError("");
+    setShowCreateModal(true);
+  };
+
+  const closeCreateModal = () => {
     if (saving) return;
-    setModalOpen(false);
-    setError("");
-  }
+    setShowCreateModal(false);
+    setCreateError("");
+  };
 
-  function updateField(event) {
-    const { name, value } = event.target;
+  const updateForm = (field, value) => {
+    setForm((previous) => ({ ...previous, [field]: value }));
+  };
 
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-      ...(name === "subject" ? { questionIds: [] } : {}),
-    }));
-  }
-
-  function toggleQuestion(questionId) {
-    setForm((current) => {
-      const alreadySelected = current.questionIds.includes(questionId);
+  const toggleQuestion = (questionId) => {
+    setForm((previous) => {
+      const exists = previous.questionIds.includes(questionId);
 
       return {
-        ...current,
-        questionIds: alreadySelected
-          ? current.questionIds.filter((id) => id !== questionId)
-          : [...current.questionIds, questionId],
+        ...previous,
+        questionIds: exists
+          ? previous.questionIds.filter((id) => id !== questionId)
+          : [...previous.questionIds, questionId],
       };
     });
-  }
+  };
 
-  const selectedQuestions = questions.filter((question) =>
-    form.questionIds.includes(question._id)
-  );
-
-  const selectedMarks = selectedQuestions.reduce(
-    (total, question) => total + Number(question.marks || 1),
-    0
-  );
-
-  async function handleCreate(event) {
+  const handleCreateTest = async (event) => {
     event.preventDefault();
-    setError("");
-    setNotice("");
+    setCreateError("");
 
     if (!form.title.trim()) {
-      setError("Enter a test title.");
+      setCreateError("Please enter an assessment title.");
       return;
     }
 
     if (!form.subject) {
-      setError("Select a subject.");
+      setCreateError("Please select a subject.");
+      return;
+    }
+
+    if (!Number.isFinite(Number(form.durationMinutes)) ||
+        Number(form.durationMinutes) < 1) {
+      setCreateError("Duration must be at least 1 minute.");
       return;
     }
 
     if (form.questionIds.length === 0) {
-      setError("Select at least one question.");
+      setCreateError("Select at least one question.");
       return;
     }
 
-    if (
-      form.startAt &&
-      form.endAt &&
-      new Date(form.endAt) <= new Date(form.startAt)
-    ) {
-      setError("The end date must be after the start date.");
-      return;
-    }
+    const selectedQuestions = questions.filter((question) =>
+      form.questionIds.includes(String(question._id))
+    );
 
-    setSaving(true);
+    const calculatedMarks = selectedQuestions.reduce(
+      (total, question) => total + Number(question.marks || 1),
+      0
+    );
+
+    const payload = {
+      title: form.title.trim(),
+      description: form.description.trim(),
+      subject: form.subject,
+      durationMinutes: Number(form.durationMinutes),
+      questionIds: form.questionIds,
+      questionCount: form.questionIds.length,
+      totalMarks: calculatedMarks,
+      status: "draft",
+      ...(form.scheduledAt
+        ? { scheduledAt: new Date(form.scheduledAt).toISOString() }
+        : {}),
+    };
 
     try {
-      const payload = {
-        ...form,
-        title: form.title.trim(),
-        description: form.description.trim(),
-        durationMinutes: Number(form.durationMinutes),
-        attemptsAllowed: Number(form.attemptsAllowed),
-        startAt: form.startAt
-          ? new Date(form.startAt).toISOString()
-          : null,
-        endAt: form.endAt
-          ? new Date(form.endAt).toISOString()
-          : null,
-      };
+      setSaving(true);
 
-      const response = await api.post("/tests", payload);
+      await api.post("/tests", payload);
 
-      setModalOpen(false);
-      setForm(initialForm);
-      setNotice(
-        response.data.message || "Test created successfully."
-      );
+      setShowCreateModal(false);
+      setForm(EMPTY_FORM);
 
-      await loadTests();
+      await fetchTests(true);
     } catch (err) {
-      setError(
+      console.error("Failed to create assessment:", err);
+
+      setCreateError(
         err.response?.data?.message ||
-          "Unable to create the test."
+          err.response?.data?.error ||
+          "Could not create assessment. Check the backend validation and request format."
       );
     } finally {
       setSaving(false);
     }
-  }
+  };
 
-  async function changeStatus(test, status) {
-    const action = status === "published" ? "publish" : "close";
+  const handleTogglePublish = async (test) => {
+    const isPublished = test.status === "published";
+
+    if (test.status === "closed") {
+      alert("This assessment is closed.");
+      return;
+    }
 
     const confirmed = window.confirm(
-      `Are you sure you want to ${action} "${test.title}"?`
+      isPublished
+        ? `Unpublish "${test.title}"? Existing attempts and results should remain preserved.`
+        : `Publish "${test.title}"? Students may be able to access it once published.`
     );
 
     if (!confirmed) return;
 
-    setUpdatingId(test._id);
-    setError("");
-    setNotice("");
-
     try {
-      const response = await api.patch(
-        `/tests/${test._id}/status`,
-        { status }
-      );
+      setUpdatingId(String(test._id));
 
-      setNotice(
-        response.data.message ||
-          `Test ${action}ed successfully.`
-      );
+      await api.patch(`/tests/${test._id}/status`, {
+        status: isPublished ? "draft" : "published",
+      });
 
-      await loadTests();
+      await fetchTests(true);
     } catch (err) {
-      setError(
+      console.error("Failed to update assessment status:", err);
+      alert(
         err.response?.data?.message ||
-          `Unable to ${action} this test.`
+          `Could not ${isPublished ? "unpublish" : "publish"} this assessment.`
       );
     } finally {
-      setUpdatingId("");
+      setUpdatingId(null);
     }
-  }
+  };
 
-  const totalTests = tests.length;
-  const draftCount = tests.filter(
-    (test) => test.status === "draft"
-  ).length;
+  const getQuestionCount = (test) => {
+    if (test.questionCount != null) return test.questionCount;
+
+    const bankQuestions = Array.isArray(test.questionIds)
+      ? test.questionIds.length
+      : Array.isArray(test.questions)
+      ? test.questions.length
+      : 0;
+
+    const manualQuestions = Array.isArray(test.manualQuestions)
+      ? test.manualQuestions.length
+      : 0;
+
+    return bankQuestions + manualQuestions;
+  };
+
+  const getSubjectName = (test) => {
+    if (test.subject && typeof test.subject === "object") {
+      return test.subject.name || test.subject.code || "—";
+    }
+
+    const subject = subjects.find(
+      (item) => String(item._id) === String(test.subject)
+    );
+
+    return subject?.name || subject?.code || "—";
+  };
+
+  const getAttemptCount = (test) =>
+    Number(
+      test.uniqueStudentsAttempted ??
+        test.studentsAttempted ??
+        test.attemptedStudents ??
+        0
+    );
+
+  const getQuestionText = (question) =>
+    question.questionText ||
+    question.text ||
+    question.title ||
+    "Untitled question";
+
+  const formatDate = (value) => {
+    if (!value) return "—";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "—";
+
+    return date.toLocaleDateString("en-GB", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const statusClasses = {
+    published: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
+    draft: "bg-slate-100 text-slate-600 ring-slate-500/20",
+    closed: "bg-amber-50 text-amber-700 ring-amber-600/20",
+  };
+
   const publishedCount = tests.filter(
     (test) => test.status === "published"
   ).length;
 
+  const draftCount = tests.filter(
+    (test) => test.status === "draft"
+  ).length;
+
+  const attemptedCount = tests.reduce(
+    (total, test) => total + getAttemptCount(test),
+    0
+  );
+
+  const selectedMarks = questions
+    .filter((question) =>
+      form.questionIds.includes(String(question._id))
+    )
+    .reduce((total, question) => total + Number(question.marks || 1), 0);
+
   return (
-    <div className="space-y-7">
-      {/* Page heading */}
+    <div className="min-h-full space-y-6 bg-slate-50 p-4 sm:p-6 lg:p-8">
+      {/* Heading */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2 text-sm font-medium text-indigo-600">
-            <BookOpen size={16} />
+          <p className="text-sm font-medium text-indigo-600">
             Assessment management
-          </div>
-
-          <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-            Tests & Exams
+          </p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+            All assessments
           </h1>
-
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
-            Build technical assessments from your question bank,
-            configure timing, and manage publication.
+          <p className="mt-2 text-sm text-slate-500">
+            Create, manage, publish, and review your assessments.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={loadTests}
-            disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+            onClick={() => fetchTests(true)}
+            disabled={refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:opacity-60"
           >
             <RefreshCw
               size={16}
-              className={loading ? "animate-spin" : ""}
+              className={refreshing ? "animate-spin" : ""}
             />
             Refresh
           </button>
@@ -359,116 +390,72 @@ export default function Tests() {
           <button
             type="button"
             onClick={openCreateModal}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500/20"
           >
-            <Plus size={17} />
-            Create test
+            <Plus size={18} />
+            Create Test
           </button>
         </div>
       </div>
 
-      {/* Notifications */}
-      {error && !modalOpen && (
-        <div className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          <AlertCircle size={18} className="mt-0.5 shrink-0" />
-          <p>{error}</p>
-        </div>
-      )}
-
-      {notice && (
-        <div className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
-          <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
-          <p>{notice}</p>
-        </div>
-      )}
-
       {/* Summary cards */}
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-slate-500">
-              Tests shown
-            </p>
-            <span className="rounded-xl bg-indigo-50 p-2.5 text-indigo-600">
-              <FileText size={20} />
-            </span>
-          </div>
-
-          <p className="mt-4 text-3xl font-bold text-slate-900">
-            {totalTests}
-          </p>
-
-          <p className="mt-1 text-xs text-slate-500">
-            Matching your current filters
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-slate-500">
-              Draft tests
-            </p>
-            <span className="rounded-xl bg-amber-50 p-2.5 text-amber-600">
-              <FilePlus2 size={20} />
-            </span>
-          </div>
-
-          <p className="mt-4 text-3xl font-bold text-slate-900">
-            {draftCount}
-          </p>
-
-          <p className="mt-1 text-xs text-slate-500">
-            Ready for review and publication
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-slate-500">
-              Published tests
-            </p>
-            <span className="rounded-xl bg-emerald-50 p-2.5 text-emerald-600">
-              <CheckCircle2 size={20} />
-            </span>
-          </div>
-
-          <p className="mt-4 text-3xl font-bold text-slate-900">
-            {publishedCount}
-          </p>
-
-          <p className="mt-1 text-xs text-slate-500">
-            Published assessment records
-          </p>
-        </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard
+          title="Total assessments"
+          value={tests.length}
+          description="Matching current filters"
+          icon={ClipboardList}
+          iconClass="bg-indigo-50 text-indigo-600"
+        />
+        <SummaryCard
+          title="Published"
+          value={publishedCount}
+          description="Currently published"
+          icon={CheckCircle2}
+          iconClass="bg-emerald-50 text-emerald-600"
+        />
+        <SummaryCard
+          title="Drafts"
+          value={draftCount}
+          description="Not yet published"
+          icon={Clock}
+          iconClass="bg-amber-50 text-amber-600"
+        />
+        <SummaryCard
+          title="Students attempted"
+          value={attemptedCount}
+          description="Across listed assessments"
+          icon={Users}
+          iconClass="bg-sky-50 text-sky-600"
+        />
       </div>
 
       {/* Filters */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="grid gap-3 md:grid-cols-3">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="relative">
             <Search
-              size={17}
+              size={18}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
             />
-
             <input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search tests..."
-              className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-3 text-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
+              placeholder="Search assessments..."
+              className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
             />
           </div>
 
           <select
             value={subjectFilter}
             onChange={(event) => setSubjectFilter(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500"
           >
             <option value="">All subjects</option>
             {subjects.map((subject) => (
               <option key={subject._id} value={subject._id}>
-                {subject.name} ({subject.code})
+                {subject.name || subject.code}
               </option>
             ))}
           </select>
@@ -476,7 +463,7 @@ export default function Tests() {
           <select
             value={statusFilter}
             onChange={(event) => setStatusFilter(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
+            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500"
           >
             <option value="">All statuses</option>
             <option value="draft">Draft</option>
@@ -484,416 +471,424 @@ export default function Tests() {
             <option value="closed">Closed</option>
           </select>
         </div>
-      </section>
+      </div>
 
-      {/* Tests table */}
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Table */}
+      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 className="font-bold text-slate-900">
-              All assessments
+            <h2 className="font-semibold text-slate-900">
+              Assessment list
             </h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Manage test settings and publication status.
+            <p className="mt-1 text-sm text-slate-500">
+              {tests.length} {tests.length === 1 ? "test" : "tests"} found
             </p>
           </div>
-
-          <span className="text-xs font-medium text-slate-500">
-            {tests.length} result{tests.length === 1 ? "" : "s"}
-          </span>
-        </div>
-
-        {loading ? (
-          <div className="flex min-h-64 items-center justify-center">
+          {refreshing && (
             <LoaderCircle
-              size={28}
+              size={18}
               className="animate-spin text-indigo-600"
             />
-          </div>
-        ) : tests.length === 0 ? (
-          <div className="flex min-h-72 flex-col items-center justify-center px-6 py-12 text-center">
-            <div className="rounded-2xl bg-slate-100 p-4 text-slate-500">
-              <FileText size={28} />
+          )}
+        </div>
+
+        {error && (
+          <div className="m-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+            <AlertCircle size={18} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-semibold">Could not load assessments</p>
+              <p className="mt-1">{error}</p>
+              <button
+                type="button"
+                onClick={() => fetchTests(true)}
+                className="mt-2 font-semibold underline"
+              >
+                Try again
+              </button>
             </div>
+          </div>
+        )}
 
+        {loading && !error ? (
+          <div className="flex min-h-52 items-center justify-center gap-3 text-sm text-slate-500">
+            <LoaderCircle
+              size={20}
+              className="animate-spin text-indigo-600"
+            />
+            Loading assessments...
+          </div>
+        ) : !error && tests.length === 0 ? (
+          <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
+            <ClipboardList size={30} className="text-slate-400" />
             <h3 className="mt-4 font-semibold text-slate-900">
-              No tests found
+              No assessments found
             </h3>
-
-            <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">
-              Create your first assessment or change the filters
-              to view other tests.
+            <p className="mt-1 text-sm text-slate-500">
+              Change the filters or create your first test.
             </p>
-
             <button
               type="button"
               onClick={openCreateModal}
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
             >
-              <Plus size={16} />
-              Create your first test
+              <Plus size={17} />
+              Create Test
             </button>
           </div>
-        ) : (
+        ) : !error ? (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[850px] text-left">
-              <thead className="bg-slate-50">
-                <tr className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <th className="px-5 py-4">Assessment</th>
-                  <th className="px-5 py-4">Questions</th>
-                  <th className="px-5 py-4">Duration</th>
-                  <th className="px-5 py-4">Schedule</th>
-                  <th className="px-5 py-4">Status</th>
-                  <th className="px-5 py-4 text-right">Actions</th>
+            <table className="w-full min-w-[1120px] text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th className="px-5 py-4 font-semibold">Assessment</th>
+                  <th className="px-5 py-4 font-semibold">Subject</th>
+                  <th className="px-5 py-4 font-semibold">Questions</th>
+                  <th className="px-5 py-4 font-semibold">Duration</th>
+                  <th className="px-5 py-4 font-semibold">Schedule</th>
+                  <th className="px-5 py-4 font-semibold">Status</th>
+                  <th className="px-5 py-4 font-semibold">
+                    Students attempted
+                  </th>
+                  <th className="px-5 py-4 font-semibold">Results</th>
                 </tr>
               </thead>
-
               <tbody className="divide-y divide-slate-100">
-                {tests.map((test) => (
-                  <tr
-                    key={test._id}
-                    className="transition hover:bg-slate-50/70"
-                  >
-                    <td className="px-5 py-4">
-                      <p className="font-semibold text-slate-900">
-                        {test.title}
-                      </p>
+                {tests.map((test) => {
+                  const isPublished = test.status === "published";
+                  const isUpdating = updatingId === String(test._id);
+                  const attempts = getAttemptCount(test);
 
-                      <p className="mt-1 text-xs text-slate-500">
-                        {test.subject?.name || "Subject unavailable"}
-                        {test.subject?.code
-                          ? ` · ${test.subject.code}`
+                  return (
+                    <tr
+                      key={test._id}
+                      className="transition hover:bg-slate-50/80"
+                    >
+                      <td className="px-5 py-4">
+                        <div className="flex items-start gap-3">
+                          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
+                            <BookOpen size={19} />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-slate-900">
+                              {test.title || "Untitled assessment"}
+                            </p>
+                            <p className="mt-1 max-w-xs truncate text-xs text-slate-500">
+                              {test.description || "No description"}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4 font-medium text-slate-700">
+                        {getSubjectName(test)}
+                      </td>
+
+                      <td className="px-5 py-4 text-slate-700">
+                        {getQuestionCount(test)}
+                      </td>
+
+                      <td className="whitespace-nowrap px-5 py-4 text-slate-700">
+                        {test.durationMinutes ?? test.duration ?? "—"}
+                        {(test.durationMinutes ?? test.duration) != null
+                          ? " min"
                           : ""}
-                      </p>
-                    </td>
+                      </td>
 
-                    <td className="px-5 py-4">
-                      <p className="font-semibold text-slate-800">
-                        {test.questionCount ??
-                          test.questions?.length ??
-                          0}{" "}
-                        questions
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-500">
-                        {test.totalMarks} marks
-                      </p>
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <span className="inline-flex items-center gap-1.5 text-sm text-slate-700">
-                        <Clock3 size={15} className="text-slate-400" />
-                        {test.durationMinutes} min
-                      </span>
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <span className="inline-flex items-center gap-1.5 text-xs text-slate-600">
-                        <CalendarClock
-                          size={15}
-                          className="shrink-0 text-slate-400"
-                        />
-                        {formatDate(test.startAt)}
-                      </span>
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <StatusBadge status={test.status} />
-                    </td>
-
-                    <td className="px-5 py-4">
-                      <div className="flex justify-end">
-                        {updatingId === test._id ? (
-                          <LoaderCircle
-                            size={19}
-                            className="animate-spin text-indigo-600"
+                      <td className="whitespace-nowrap px-5 py-4">
+                        <div className="flex items-center gap-2 text-slate-600">
+                          <CalendarDays
+                            size={15}
+                            className="text-slate-400"
                           />
-                        ) : test.status === "draft" ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              changeStatus(test, "published")
-                            }
-                            className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                          {formatDate(
+                            test.scheduledAt ||
+                              test.startDate ||
+                              test.createdAt
+                          )}
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 ring-inset ${
+                              statusClasses[test.status] ||
+                              statusClasses.draft
+                            }`}
                           >
-                            Publish
-                          </button>
-                        ) : test.status === "published" ? (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              changeStatus(test, "closed")
-                            }
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-100"
-                          >
-                            Close test
-                          </button>
-                        ) : (
-                          <span className="text-xs text-slate-400">
-                            No actions
+                            {test.status || "draft"}
                           </span>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={isPublished}
+                            aria-label={`${
+                              isPublished ? "Unpublish" : "Publish"
+                            } ${test.title || "assessment"}`}
+                            title={
+                              isPublished
+                                ? "Unpublish assessment"
+                                : "Publish assessment"
+                            }
+                            disabled={
+                              isUpdating || test.status === "closed"
+                            }
+                            onClick={() => handleTogglePublish(test)}
+                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-4 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50 ${
+                              isPublished
+                                ? "bg-emerald-600"
+                                : "bg-slate-300"
+                            }`}
+                          >
+                            {isUpdating ? (
+                              <LoaderCircle
+                                size={15}
+                                className="absolute left-1/2 -translate-x-1/2 animate-spin text-white"
+                              />
+                            ) : (
+                              <span
+                                className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
+                                  isPublished
+                                    ? "translate-x-6"
+                                    : "translate-x-1"
+                                }`}
+                              />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-2">
+                          <Users size={16} className="text-slate-400" />
+                          <span className="font-semibold tabular-nums text-slate-800">
+                            {attempts}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {attempts === 1 ? "student" : "students"}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="px-5 py-4">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            navigate(`/admin/tests/${test._id}/results`)
+                          }
+                          className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-50"
+                        >
+                          <Eye size={15} />
+                          View Results
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        )}
-      </section>
+        ) : null}
+
+        <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>Showing {tests.length} assessments</span>
+          <span>New assessments are saved as drafts.</span>
+        </div>
+      </div>
 
       {/* Create test modal */}
-      {modalOpen && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-3 backdrop-blur-sm sm:p-6">
-          <div className="my-auto w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-100 px-5 py-5 sm:px-7">
+      {showCreateModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-3 backdrop-blur-sm sm:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeCreateModal();
+            }
+          }}
+        >
+          <div className="my-auto flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+            <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
               <div>
-                <div className="flex items-center gap-2 text-sm font-medium text-indigo-600">
-                  <FilePlus2 size={17} />
-                  New assessment
-                </div>
-
-                <h2 className="mt-1 text-xl font-bold text-slate-900">
-                  Create test
+                <h2 className="text-xl font-bold text-slate-900">
+                  Create assessment
                 </h2>
-
                 <p className="mt-1 text-sm text-slate-500">
-                  Configure the assessment and select its questions.
+                  Set the test details and choose questions from your question bank.
                 </p>
               </div>
-
               <button
                 type="button"
-                onClick={closeModal}
+                onClick={closeCreateModal}
                 disabled={saving}
-                aria-label="Close modal"
-                className="rounded-xl p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
+                aria-label="Close create assessment form"
+                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
               >
                 <X size={20} />
               </button>
             </div>
 
-            <form onSubmit={handleCreate}>
-              <div className="max-h-[65vh] space-y-6 overflow-y-auto p-5 sm:p-7">
-                {error && (
-                  <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+            <form
+              onSubmit={handleCreateTest}
+              className="flex min-h-0 flex-1 flex-col"
+            >
+              <div className="space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
+                {createError && (
+                  <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                     <AlertCircle
-                      size={17}
+                      size={18}
                       className="mt-0.5 shrink-0"
                     />
-                    {error}
+                    <span>{createError}</span>
                   </div>
                 )}
 
-                <div className="grid gap-5 sm:grid-cols-2">
-                  <label className="block sm:col-span-2">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Test title *
-                    </span>
-
-                    <input
-                      name="title"
-                      value={form.title}
-                      onChange={updateField}
-                      required
-                      maxLength={150}
-                      placeholder="e.g. DBMS Mid-Semester Test"
-                      className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
-                    />
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Assessment title *
                   </label>
+                  <input
+                    required
+                    maxLength={150}
+                    value={form.title}
+                    onChange={(event) =>
+                      updateForm("title", event.target.value)
+                    }
+                    placeholder="e.g. Data Structures Mid-Sem Test"
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
+                  />
+                </div>
 
-                  <label className="block sm:col-span-2">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Description
-                    </span>
-
-                    <textarea
-                      name="description"
-                      value={form.description}
-                      onChange={updateField}
-                      rows={2}
-                      maxLength={1000}
-                      placeholder="Describe the assessment..."
-                      className="w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
-                    />
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Description
                   </label>
+                  <textarea
+                    rows={2}
+                    maxLength={1000}
+                    value={form.description}
+                    onChange={(event) =>
+                      updateForm("description", event.target.value)
+                    }
+                    placeholder="Add instructions or a short description..."
+                    className="w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
+                  />
+                </div>
 
-                  <label className="block sm:col-span-2">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-slate-700">
                       Subject *
-                    </span>
-
+                    </label>
                     <select
-                      name="subject"
-                      value={form.subject}
-                      onChange={updateField}
                       required
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
+                      value={form.subject}
+                      onChange={(event) => {
+                        updateForm("subject", event.target.value);
+                        updateForm("questionIds", []);
+                        setCreateError("");
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none focus:border-indigo-500"
                     >
-                      <option value="">Choose a subject</option>
-
+                      <option value="">Select subject</option>
                       {subjects.map((subject) => (
-                        <option
-                          key={subject._id}
-                          value={subject._id}
-                        >
-                          {subject.name} ({subject.code})
+                        <option key={subject._id} value={subject._id}>
+                          {subject.name || subject.code}
                         </option>
                       ))}
                     </select>
+                  </div>
 
-                    {subjects.length === 0 && (
-                      <p className="mt-2 text-xs text-amber-700">
-                        Create and activate a subject before creating a test.
-                      </p>
-                    )}
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-semibold text-slate-700">
                       Duration (minutes) *
-                    </span>
-
+                    </label>
                     <input
+                      required
                       type="number"
-                      name="durationMinutes"
-                      value={form.durationMinutes}
-                      onChange={updateField}
                       min="1"
                       max="600"
-                      required
-                      className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
+                      value={form.durationMinutes}
+                      onChange={(event) =>
+                        updateForm("durationMinutes", event.target.value)
+                      }
+                      className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500"
                     />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Allowed attempts
-                    </span>
-
-                    <input
-                      type="number"
-                      name="attemptsAllowed"
-                      value={form.attemptsAllowed}
-                      onChange={updateField}
-                      min="1"
-                      max="10"
-                      required
-                      className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
-                    />
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Start date and time
-                    </span>
-
-                    <input
-                      type="datetime-local"
-                      name="startAt"
-                      value={form.startAt}
-                      onChange={updateField}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
-                    />
-
-                    <span className="mt-1 block text-xs text-slate-400">
-                      Leave empty for an unscheduled test.
-                    </span>
-                  </label>
-
-                  <label className="block">
-                    <span className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      End date and time
-                    </span>
-
-                    <input
-                      type="datetime-local"
-                      name="endAt"
-                      value={form.endAt}
-                      onChange={updateField}
-                      min={form.startAt || undefined}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-3 text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50"
-                    />
-                  </label>
+                  </div>
                 </div>
 
-                {/* Question selection */}
-                <section className="overflow-hidden rounded-xl border border-slate-200">
-                  <div className="flex flex-col gap-3 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
+                    Scheduled date and time (optional)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={form.scheduledAt}
+                    onChange={(event) =>
+                      updateForm("scheduledAt", event.target.value)
+                    }
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500"
+                  />
+                  <p className="mt-1.5 text-xs text-slate-500">
+                    The assessment will be created as a draft regardless of this date.
+                  </p>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-slate-200">
+                  <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <h3 className="font-semibold text-slate-900">
+                      <h3 className="text-sm font-semibold text-slate-900">
                         Select questions *
                       </h3>
-
                       <p className="mt-1 text-xs text-slate-500">
-                        Only active questions from the selected subject are shown.
+                        Choose questions for the selected subject.
                       </p>
                     </div>
-
-                    <div className="shrink-0 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700">
+                    <div className="text-sm font-semibold text-indigo-700">
                       {form.questionIds.length} selected · {selectedMarks} marks
                     </div>
                   </div>
 
                   {!form.subject ? (
-                    <p className="p-6 text-center text-sm text-slate-500">
-                      Select a subject to load its questions.
-                    </p>
-                  ) : questionsLoading ? (
-                    <div className="flex items-center justify-center gap-2 p-8 text-sm text-slate-500">
-                      <LoaderCircle
-                        size={18}
-                        className="animate-spin"
-                      />
-                      Loading questions...
+                    <div className="px-4 py-8 text-center text-sm text-slate-500">
+                      Select a subject first to load its questions.
                     </div>
                   ) : questions.length === 0 ? (
-                    <p className="p-6 text-center text-sm text-slate-500">
-                      No active questions found for this subject.
-                      Add questions in the Question Bank first.
-                    </p>
+                    <div className="px-4 py-8 text-center text-sm text-slate-500">
+                      No questions returned. Add active questions to this subject in the question bank.
+                    </div>
                   ) : (
                     <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
-                      {questions.map((question, index) => {
-                        const checked = form.questionIds.includes(
-                          question._id
-                        );
+                      {questions.map((question) => {
+                        const id = String(question._id);
+                        const selected = form.questionIds.includes(id);
 
                         return (
                           <label
-                            key={question._id}
-                            className={`flex cursor-pointer items-start gap-3 p-4 transition ${
-                              checked
-                                ? "bg-indigo-50/70"
-                                : "hover:bg-slate-50"
+                            key={id}
+                            className={`flex cursor-pointer items-start gap-3 px-4 py-3 transition hover:bg-slate-50 ${
+                              selected ? "bg-indigo-50/60" : "bg-white"
                             }`}
                           >
                             <input
                               type="checkbox"
-                              checked={checked}
-                              onChange={() =>
-                                toggleQuestion(question._id)
-                              }
-                              className="mt-1 size-4 accent-indigo-600"
+                              checked={selected}
+                              onChange={() => toggleQuestion(id)}
+                              className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                             />
-
                             <span className="min-w-0 flex-1">
-                              <span className="block text-sm font-medium leading-6 text-slate-800">
-                                <span className="mr-2 text-xs text-slate-400">
-                                  Q{index + 1}.
-                                </span>
-                                {question.questionText}
+                              <span className="block text-sm font-medium text-slate-800">
+                                {getQuestionText(question)}
                               </span>
-
-                              <span className="mt-2 flex flex-wrap gap-2">
-                                <span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-600">
-                                  {question.marks || 1} marks
+                              <span className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                                <span>
+                                  {Number(question.marks || 1)} marks
                                 </span>
-
-                                <span className="rounded-md bg-slate-100 px-2 py-1 text-xs capitalize text-slate-600">
-                                  {question.difficulty || "medium"}
-                                </span>
+                                {question.difficulty && (
+                                  <span className="capitalize">
+                                    {question.difficulty}
+                                  </span>
+                                )}
                               </span>
                             </span>
                           </label>
@@ -901,49 +896,67 @@ export default function Tests() {
                       })}
                     </div>
                   )}
-                </section>
+                </div>
               </div>
 
-              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 sm:flex-row sm:justify-end sm:px-7">
-                <button
-                  type="button"
-                  onClick={closeModal}
-                  disabled={saving}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  disabled={
-                    saving ||
-                    questionsLoading ||
-                    !form.subject ||
-                    form.questionIds.length === 0
-                  }
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {saving ? (
-                    <>
-                      <LoaderCircle
-                        size={16}
-                        className="animate-spin"
-                      />
-                      Saving...
-                    </>
-                  ) : (
-                    <>
-                      <Plus size={16} />
-                      Save as draft
-                    </>
-                  )}
-                </button>
+              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+                <p className="text-xs text-slate-500">
+                  Assessment will be saved as a draft.
+                </p>
+                <div className="flex gap-3">
+                  <button
+                    type="button"
+                    onClick={closeCreateModal}
+                    disabled={saving}
+                    className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {saving ? (
+                      <LoaderCircle size={17} className="animate-spin" />
+                    ) : (
+                      <Save size={17} />
+                    )}
+                    {saving ? "Creating..." : "Create Test"}
+                  </button>
+                </div>
               </div>
             </form>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function SummaryCard({
+  title,
+  value,
+  description,
+  icon: Icon,
+  iconClass,
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-sm font-medium text-slate-500">{title}</p>
+          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+            {value}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">{description}</p>
+        </div>
+        <div
+          className={`flex h-11 w-11 items-center justify-center rounded-xl ${iconClass}`}
+        >
+          <Icon size={21} />
+        </div>
+      </div>
     </div>
   );
 }
