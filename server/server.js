@@ -16,6 +16,8 @@ import dashboardRoutes from "./routes/dashboardRoutes.js";
 import questionRoutes from "./routes/questionRoutes.js";
 import studentAssessmentRoutes from "./routes/studentAssessmentRoutes.js";
 import testRoutes from "./routes/testRoutes.js";
+import studentQuestionBankRoutes from "./routes/studentQuestionBankRoutes.js";
+import questionBankRoutes from "./routes/questionBankRoutes.js";
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -25,10 +27,23 @@ if (!process.env.JWT_SECRET) {
 
 app.use(helmet());
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
@@ -47,6 +62,9 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/questions", questionRoutes);
 app.use("/api/tests", testRoutes);
 app.use("/api/student-assessments", studentAssessmentRoutes);
+app.use("/api/question-banks", questionBankRoutes);
+
+app.use("/api/student-question-bank", studentQuestionBankRoutes);
 app.use((req, res) => {
   res.status(404).json({
     success: false,

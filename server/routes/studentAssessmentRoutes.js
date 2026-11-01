@@ -9,30 +9,34 @@ import {
   submitTestAttempt,
 } from "../controller/studentAssessmentController.js";
 
+import { getStudentResults } from "../controller/studentResultsController.js";
+
 import {
   protect,
   authorize,
 } from "../middleware/authMiddleware.js";
-import { getStudentResults } from "../controller/studentResultsController.js";
+
 const router = Router();
 
-// Every endpoint in this router requires an authenticated student.
+// Every endpoint requires an authenticated student.
 router.use(protect, authorize("student"));
 
-// GET /api/student-assessments
+// List published assessments.
 router.get("/", getAvailableTests);
 
-// POST /api/student-assessments/:testId/start
+// Results must be registered before parameterized attempt routes.
+router.get("/results", getStudentResults);
+
+// Start or resume an assessment.
 router.post("/:testId/start", startTestAttempt);
 
-// GET /api/student-assessments/attempts/:attemptId
+// Retrieve an existing attempt.
 router.get("/attempts/:attemptId", getTestAttempt);
 
-// PATCH /api/student-assessments/attempts/:attemptId/answers
+// Save answers.
 router.patch("/attempts/:attemptId/answers", saveTestAnswers);
 
-// POST /api/student-assessments/attempts/:attemptId/submit
+// Submit an attempt.
 router.post("/attempts/:attemptId/submit", submitTestAttempt);
-router.get("/results", getStudentResults);
 
 export default router;

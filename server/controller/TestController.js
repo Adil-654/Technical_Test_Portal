@@ -1,8 +1,17 @@
-
 import mongoose from "mongoose";
 import Test from "../models/Test.js";
 import Subject from "../models/Subject.js";
 import Question from "../models/Question.js";
+import TestAttempt from "../models/TestAttempt.js";
+
+const VALID_STATUSES = ["draft", "published", "closed"];
+
+function sendError(res, status, message) {
+  return res.status(status).json({
+    success: false,
+    message,
+  });
+}
 
 function validateObjectId(id) {
   return mongoose.isValidObjectId(id);
@@ -41,32 +50,46 @@ async function validateTestData(data) {
     return "Question IDs must be valid and unique.";
   }
 
+  const duration = Number(durationMinutes);
+
   if (
-    !Number.isInteger(Number(durationMinutes)) ||
-    Number(durationMinutes) < 1 ||
-    Number(durationMinutes) > 600
+    !Number.isInteger(duration) ||
+    duration < 1 ||
+    duration > 600
   ) {
     return "Duration must be between 1 and 600 minutes.";
   }
 
   if (
     attemptsAllowed !== undefined &&
-    (!Number.isInteger(Number(attemptsAllowed)) ||
+    (
+      !Number.isInteger(Number(attemptsAllowed)) ||
       Number(attemptsAllowed) < 1 ||
-      Number(attemptsAllowed) > 10)
+      Number(attemptsAllowed) > 10
+    )
   ) {
     return "Allowed attempts must be between 1 and 10.";
   }
 
-  if (startAt && Number.isNaN(Date.parse(startAt))) {
+  if (
+    startAt &&
+    Number.isNaN(Date.parse(startAt))
+  ) {
     return "Enter a valid test start date.";
   }
 
-  if (endAt && Number.isNaN(Date.parse(endAt))) {
+  if (
+    endAt &&
+    Number.isNaN(Date.parse(endAt))
+  ) {
     return "Enter a valid test end date.";
   }
 
-  if (startAt && endAt && new Date(endAt) <= new Date(startAt)) {
+  if (
+    startAt &&
+    endAt &&
+    new Date(endAt) <= new Date(startAt)
+  ) {
     return "The end date must be after the start date.";
   }
 
@@ -90,7 +113,7 @@ async function validateTestData(data) {
   }
 
   const totalMarks = selectedQuestions.reduce(
-    (sum, question) => sum + question.marks,
+    (sum, question) => sum + Number(question.marks || 1),
     0
   );
 
@@ -99,10 +122,10 @@ async function validateTestData(data) {
 
 function getTestPayload(body) {
   return {
-    title: body.title,
+    title: body.title.trim(),
     description: body.description ?? "",
     subject: body.subject,
-    questions: body.questionIds,
+    questionIds: body.questionIds,
     durationMinutes: Number(body.durationMinutes),
     startAt: body.startAt || null,
     endAt: body.endAt || null,
@@ -110,72 +133,7 @@ function getTestPayload(body) {
   };
 }
 
-/* GET /api/tests */
-import TestAttempt from "../models/TestAttempt.js";
-
-// GET /api/tests/:id/results
-export async function getTestResults(req, res, next) {
-  try {
-    const { id } = req.params;
-
-    if (!mongoose.isValidObjectId(id)) {
-      return res.status(400).json({ message: "Invalid test ID." });
-    }
-
-    const test = await Test.findById(id)
-      .populate("subject", "name code")
-      .select("title subject totalMarks")
-      .lean();
-
-    if (!test) {
-      return res.status(404).json({ message: "Test not found." });
-    }
-
-    const attempts = await TestAttempt.find({
-      test: id,
-      status: "submitted",
-    })
-      .populate("student", "name email studentId")
-      .sort({ submittedAt: -1 })
-      .lean();
-
-    const students = attempts.map((attempt) => ({
-      attemptId: attempt._id,
-      studentName: attempt.student?.name || "Unknown student",
-      studentId: attempt.student?.studentId || "—",
-      email: attempt.student?.email || "—",
-      marksObtained: attempt.score ?? 0,
-      totalMarks: attempt.totalMarks ?? test.totalMarks ?? 0,
-      percentage:
-        attempt.percentage ??
-        (attempt.totalMarks > 0
-          ? Number(
-              (((attempt.score ?? 0) / attempt.totalMarks) * 100).toFixed(2)
-            )
-          : 0),
-      attemptNumber: attempt.attemptNumber,
-      submittedAt: attempt.submittedAt,
-    }));
-
-    return res.status(200).json({
-      success: true,
-      test,
-      totalSubmittedAttempts: attempts.length,
-      uniqueStudentsAttempted: new Set(
-        attempts
-          .filter((attempt) => attempt.student?._id)
-          .map((attempt) => String(attempt.student._id))
-      ).size,
-      students,
-    });
-  } catch (error) {
-    next(error);
-  }
-}
 // GET /api/tests
-
-
-/* GET /api/tests */
 export async function getTests(req, res, next) {
   try {
     const {
@@ -187,69 +145,61 @@ export async function getTests(req, res, next) {
     const filter = {};
 
     if (subject) {
-      if (!mongoose.isValidObjectId(subject)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid subject ID.",
-        });
+      if (!validateObjectId(subject)) {
+        return sendError(res, 400, "Invalid subject ID.");
       }
 
       filter.subject = subject;
     }
 
-    if (["draft", "published", "closed"].includes(status)) {
+    if (status) {
+      if (!VALID_STATUSES.includes(status)) {
+        return sendError(res, 400, "Invalid test status.");
+      }
+
       filter.status = status;
     }
 
     if (typeof search === "string" && search.trim()) {
-      const escapedSearch = search
+      const escaped = search
         .trim()
         .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
       filter.title = {
-        $regex: escapedSearch,
+        $regex: escaped,
         $options: "i",
       };
     }
 
-    // Fetch tests without populating potentially undefined schema paths.
     const tests = await Test.find(filter)
       .populate("subject", "name code")
       .sort({ createdAt: -1 })
       .lean();
 
-    if (tests.length === 0) {
-      return res.status(200).json({
-        success: true,
-        count: 0,
-        tests: [],
-      });
-    }
-
-    // Count unique students and attempts for each test.
     const testIds = tests.map((test) => test._id);
 
-    const attempts = await TestAttempt.find({
-      test: { $in: testIds },
-    })
-      .select("test student status")
-      .lean();
+    const attempts = testIds.length
+      ? await TestAttempt.find({
+          test: { $in: testIds },
+        })
+          .select("test student status")
+          .lean()
+      : [];
 
     const stats = new Map();
 
     for (const attempt of attempts) {
-      const testId = String(attempt.test);
+      const id = String(attempt.test);
 
-      if (!stats.has(testId)) {
-        stats.set(testId, {
+      if (!stats.has(id)) {
+        stats.set(id, {
           students: new Set(),
           submittedAttempts: 0,
           totalAttempts: 0,
         });
       }
 
-      const stat = stats.get(testId);
-
+      const stat = stats.get(id);
       stat.totalAttempts += 1;
 
       if (attempt.student) {
@@ -264,39 +214,14 @@ export async function getTests(req, res, next) {
     const result = tests.map((test) => {
       const stat = stats.get(String(test._id));
 
-      const questionIds = Array.isArray(test.questionIds)
+      const ids = Array.isArray(test.questionIds)
         ? test.questionIds
-        : Array.isArray(test.questions)
-          ? test.questions
-          : [];
-
-      const manualQuestions = Array.isArray(test.manualQuestions)
-        ? test.manualQuestions
         : [];
 
       return {
         ...test,
-
-        questionCount:
-          test.questionCount ??
-          questionIds.length + manualQuestions.length,
-
-        totalMarks:
-          test.totalMarks ??
-          questionIds.reduce(
-            (total, question) =>
-              total +
-              (typeof question === "object"
-                ? Number(question?.marks || 0)
-                : 0),
-            0
-          ) +
-          manualQuestions.reduce(
-            (total, question) =>
-              total + Number(question?.marks || 0),
-            0
-          ),
-
+        questionCount: test.questionCount ?? ids.length,
+        totalMarks: test.totalMarks ?? 0,
         uniqueStudentsAttempted: stat?.students.size ?? 0,
         submittedAttempts: stat?.submittedAttempts ?? 0,
         totalAttempts: stat?.totalAttempts ?? 0,
@@ -309,31 +234,30 @@ export async function getTests(req, res, next) {
       tests: result,
     });
   } catch (error) {
-    console.error("GET /api/tests failed:", error);
+    console.error("getTests:", error);
     next(error);
   }
 }
 
-/* GET /api/tests/:id */
+// GET /api/tests/:id
 export async function getTestById(req, res, next) {
   try {
-    if (!validateObjectId(req.params.id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid test ID.",
-      });
+    const { id } = req.params;
+
+    if (!validateObjectId(id)) {
+      return sendError(res, 400, "Invalid test ID.");
     }
 
-    const test = await Test.findById(req.params.id)
+    const test = await Test.findById(id)
       .populate("subject", "name code")
-      .populate("questions", "questionText options marks difficulty isActive")
+      .populate(
+        "questionIds",
+        "questionText options marks difficulty isActive"
+      )
       .lean();
 
     if (!test) {
-      return res.status(404).json({
-        success: false,
-        message: "Test not found.",
-      });
+      return sendError(res, 404, "Test not found.");
     }
 
     return res.status(200).json({
@@ -345,9 +269,10 @@ export async function getTestById(req, res, next) {
   }
 }
 
+// POST /api/tests
+export async function createTest(req, res, next) {
+  let createdQuestionIds = [];
 
-
-export const createTest = async (req, res) => {
   try {
     const {
       title,
@@ -355,265 +280,173 @@ export const createTest = async (req, res) => {
       subject,
       questionIds = [],
       manualQuestions = [],
-      durationMinutes = 30,
+      durationMinutes,
+      startAt,
+      endAt,
       attemptsAllowed = 1,
-      startAt = null,
-      endAt = null,
     } = req.body;
 
-    if (!title?.trim()) {
-      return res.status(400).json({
-        message: "Test title is required.",
-      });
+    if (!mongoose.isValidObjectId(subject)) {
+      return sendError(res, 400, "Select a valid subject.");
     }
 
-    if (
-      !mongoose.Types.ObjectId.isValid(subject)
-    ) {
-      return res.status(400).json({
-        message: "A valid subject is required.",
-      });
-    }
-
-    if (!Array.isArray(questionIds) || !Array.isArray(manualQuestions)) {
-      return res.status(400).json({
-        message: "Questions must be provided as arrays.",
-      });
-    }
-
-    if (questionIds.length === 0 && manualQuestions.length === 0) {
-      return res.status(400).json({
-        message: "Add at least one question.",
-      });
-    }
-
-    if (
-      !Number.isInteger(Number(durationMinutes)) ||
-      Number(durationMinutes) < 1 ||
-      Number(durationMinutes) > 600
-    ) {
-      return res.status(400).json({
-        message: "Duration must be between 1 and 600 minutes.",
-      });
-    }
-
-    if (
-      !Number.isInteger(Number(attemptsAllowed)) ||
-      Number(attemptsAllowed) < 1 ||
-      Number(attemptsAllowed) > 10
-    ) {
-      return res.status(400).json({
-        message: "Allowed attempts must be between 1 and 10.",
-      });
-    }
-
-    if (startAt && Number.isNaN(Date.parse(startAt))) {
-      return res.status(400).json({
-        message: "Invalid start date.",
-      });
-    }
-
-    if (endAt && Number.isNaN(Date.parse(endAt))) {
-      return res.status(400).json({
-        message: "Invalid end date.",
-      });
-    }
-
-    if (startAt && endAt && new Date(endAt) <= new Date(startAt)) {
-      return res.status(400).json({
-        message: "The end date must be after the start date.",
-      });
-    }
-
-    const subjectExists = await Subject.findById(subject);
-
-    if (!subjectExists) {
-      return res.status(404).json({
-        message: "Subject not found.",
-      });
-    }
-
-    if (subjectExists.isActive === false) {
-      return res.status(400).json({
-        message: "This subject is inactive.",
-      });
-    }
-
-    // Validate Question Bank IDs.
-    const uniqueQuestionIds = [...new Set(questionIds.map(String))];
-
-    for (const id of uniqueQuestionIds) {
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-        return res.status(400).json({
-          message: `Invalid question ID: ${id}`,
-        });
-      }
-    }
-
-    const bankQuestions = uniqueQuestionIds.length
-      ? await Question.find({
-          _id: { $in: uniqueQuestionIds },
-          subject,
-          status: "active",
-        })
-      : [];
-
-    if (bankQuestions.length !== uniqueQuestionIds.length) {
-      return res.status(400).json({
-        message:
-          "Some selected questions are unavailable, inactive, or belong to another subject.",
-      });
-    }
-
-    // Validate and normalize manually created questions.
-    const normalizedManualQuestions = [];
-
-    for (let index = 0; index < manualQuestions.length; index += 1) {
-      const question = manualQuestions[index];
-
-      if (!question.questionText?.trim()) {
-        return res.status(400).json({
-          message: `Question ${index + 1}: question text is required.`,
-        });
-      }
-
-      if (!["MCQ", "TRUE_FALSE"].includes(question.type)) {
-        return res.status(400).json({
-          message: `Question ${index + 1}: unsupported question type.`,
-        });
-      }
-
-      const marks = Number(question.marks ?? 1);
-
-      if (!Number.isFinite(marks) || marks < 1) {
-        return res.status(400).json({
-          message: `Question ${index + 1}: marks must be at least 1.`,
-        });
-      }
-
-      const options =
-        question.type === "TRUE_FALSE"
-          ? ["True", "False"]
-          : Array.isArray(question.options)
-            ? question.options
-                .filter(
-                  (option) =>
-                    typeof option === "string" && option.trim()
-                )
-                .map((option) => option.trim())
-            : [];
-
-      if (question.type === "MCQ" && options.length < 2) {
-        return res.status(400).json({
-          message: `Question ${index + 1}: provide at least two options.`,
-        });
-      }
-
-      const correctAnswer = question.correctAnswer?.trim();
-
-      if (!correctAnswer || !options.includes(correctAnswer)) {
-        return res.status(400).json({
-          message: `Question ${index + 1}: correct answer must match one of its options.`,
-        });
-      }
-
-      const difficulty = ["easy", "medium", "hard"].includes(
-        question.difficulty
-      )
-        ? question.difficulty
-        : "medium";
-
-      normalizedManualQuestions.push({
-        questionText: question.questionText.trim(),
-        type: question.type,
-        options,
-        correctAnswer,
-        marks,
-        difficulty,
-        explanation: question.explanation?.trim() || "",
-      });
-    }
-
-    const bankMarks = bankQuestions.reduce(
-      (total, question) => total + Number(question.marks || 1),
-      0
-    );
-
-    const manualMarks = normalizedManualQuestions.reduce(
-      (total, question) => total + question.marks,
-      0
-    );
-
-    const test = await Test.create({
-      title: title.trim(),
-      description: description.trim(),
-      subject,
-      questionIds: uniqueQuestionIds,
-      manualQuestions: normalizedManualQuestions,
-      durationMinutes: Number(durationMinutes),
-      attemptsAllowed: Number(attemptsAllowed),
-      startAt: startAt ? new Date(startAt) : null,
-      endAt: endAt ? new Date(endAt) : null,
-      status: "draft",
-      questionCount:
-        bankQuestions.length + normalizedManualQuestions.length,
-      totalMarks: bankMarks + manualMarks,
-      createdBy: req.user?._id,
+    const selectedSubject = await Subject.findOne({
+      _id: subject,
+      isActive: true,
     });
+
+    if (!selectedSubject) {
+      return sendError(res, 400, "Subject does not exist or is inactive.");
+    }
+
+    // Validate manual questions
+    if (manualQuestions.length > 0) {
+      for (const [index, q] of manualQuestions.entries()) {
+        if (
+          !q.questionText?.trim() ||
+          !Array.isArray(q.options) ||
+          q.options.length !== 4 ||
+          q.options.some((o) => !o.text?.trim()) ||
+          !Number.isInteger(Number(q.correctOption)) ||
+          Number(q.correctOption) < 0 ||
+          Number(q.correctOption) > 3
+        ) {
+          return sendError(
+            res,
+            400,
+            `Please complete all fields of manual question ${index + 1}.`
+          );
+        }
+      }
+
+      // Save manual questions in Question collection
+   const createdBy = req.user?._id;
+
+if (!createdBy) {
+  return sendError(res, 401, "Admin authentication required.");
+}
+
+const questions = await Question.insertMany(
+  manualQuestions.map((q) => ({
+    subject,
+    questionText: q.questionText.trim(),
+    options: q.options.map((o) => ({ text: o.text.trim() })),
+    correctOption: Number(q.correctOption),
+    explanation: q.explanation || "",
+    difficulty: q.difficulty || "medium",
+    marks: Number(q.marks) || 1,
+    isActive: true,
+    createdBy,
+  }))
+);
+
+      createdQuestionIds = questions.map((q) => q._id);
+    }
+
+    const finalQuestionIds = [
+      ...questionIds,
+      ...createdQuestionIds,
+    ];
+
+    const validation = await validateTestData({
+      title,
+      subject,
+      questionIds: finalQuestionIds,
+      durationMinutes,
+      startAt,
+      endAt,
+      attemptsAllowed,
+    });
+
+    if (typeof validation === "string") {
+      if (createdQuestionIds.length) {
+        await Question.deleteMany({
+          _id: { $in: createdQuestionIds },
+        });
+      }
+      return sendError(res, 400, validation);
+    }
+
+    const testData = {
+      title: title.trim(),
+      description,
+      subject,
+      questionIds: finalQuestionIds,
+      durationMinutes: Number(durationMinutes),
+      startAt: startAt || null,
+      endAt: endAt || null,
+      attemptsAllowed: Number(attemptsAllowed),
+      questionCount: finalQuestionIds.length,
+      totalMarks: validation.totalMarks,
+      status: "draft",
+    };
+
+    if (req.user?._id) {
+      testData.createdBy = req.user._id;
+    }
+
+    const test = await Test.create(testData);
 
     const populatedTest = await Test.findById(test._id)
       .populate("subject", "name code")
-      .populate("questionIds");
+      .lean();
 
     return res.status(201).json({
+      success: true,
       message: "Test created successfully as a draft.",
       test: populatedTest,
     });
   } catch (error) {
-    console.error("Create test error:", error);
-
-    return res.status(500).json({
-      message: "Unable to create the test.",
-    });
-  }
-};
-
-/* PATCH /api/tests/:id */
-export async function updateTest(req, res, next) {
-  try {
-    if (!validateObjectId(req.params.id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid test ID.",
-      });
+    if (createdQuestionIds.length) {
+      await Question.deleteMany({
+        _id: { $in: createdQuestionIds },
+      }).catch(console.error);
     }
 
-    const test = await Test.findById(req.params.id);
+    console.error("createTest:", error);
+
+    if (
+      error.name === "ValidationError" ||
+      error.name === "CastError"
+    ) {
+      return sendError(res, 400, error.message);
+    }
+
+    next(error);
+  }
+}
+
+// PATCH /api/tests/:id
+export async function updateTest(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    if (!validateObjectId(id)) {
+      return sendError(res, 400, "Invalid test ID.");
+    }
+
+    const test = await Test.findById(id);
 
     if (!test) {
-      return res.status(404).json({
-        success: false,
-        message: "Test not found.",
-      });
+      return sendError(res, 404, "Test not found.");
     }
 
     if (test.status !== "draft") {
-      return res.status(400).json({
-        success: false,
-        message: "Only draft tests can be edited. Close a published test before creating a revised draft.",
-      });
+      return sendError(
+        res,
+        400,
+        "Only draft tests can be edited."
+      );
     }
 
     const validation = await validateTestData(req.body);
 
     if (typeof validation === "string") {
-      return res.status(400).json({
-        success: false,
-        message: validation,
-      });
+      return sendError(res, 400, validation);
     }
 
     Object.assign(test, getTestPayload(req.body));
+    test.questionCount = req.body.questionIds.length;
     test.totalMarks = validation.totalMarks;
 
     await test.save();
@@ -629,66 +462,69 @@ export async function updateTest(req, res, next) {
       test: updatedTest,
     });
   } catch (error) {
+    console.error("updateTest:", error);
     next(error);
   }
 }
 
-/* PATCH /api/tests/:id/status */
+// PATCH /api/tests/:id/status
 export async function updateTestStatus(req, res, next) {
   try {
-    if (!validateObjectId(req.params.id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid test ID.",
-      });
-    }
-
+    const { id } = req.params;
     const { status } = req.body;
 
-    if (!["published", "closed"].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: "Status must be published or closed.",
-      });
+    if (!validateObjectId(id)) {
+      return sendError(res, 400, "Invalid test ID.");
     }
 
-    const test = await Test.findById(req.params.id);
+    if (!["draft", "published"].includes(status)) {
+      return sendError(
+        res,
+        400,
+        "Status must be either draft or published."
+      );
+    }
+
+    const test = await Test.findById(id);
 
     if (!test) {
-      return res.status(404).json({
-        success: false,
-        message: "Test not found.",
-      });
+      return sendError(res, 404, "Test not found.");
+    }
+
+    if (test.status === "closed") {
+      return sendError(
+        res,
+        400,
+        "Closed tests cannot be published or unpublished."
+      );
     }
 
     if (status === "published") {
-      if (test.status !== "draft") {
-        return res.status(400).json({
-          success: false,
-          message: "Only draft tests can be published.",
-        });
+      const questionIds = Array.isArray(test.questionIds)
+        ? test.questionIds
+        : [];
+
+      if (questionIds.length === 0) {
+        return sendError(
+          res,
+          400,
+          "Add at least one question before publishing."
+        );
       }
 
-      const activeQuestions = await Question.countDocuments({
-        _id: { $in: test.questions },
+      const activeQuestions = await Question.find({
+        _id: { $in: questionIds },
         subject: test.subject,
         isActive: true,
-      });
+      }).select("_id");
 
-      if (
-        test.questions.length === 0 ||
-        activeQuestions !== test.questions.length
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "This test contains unavailable questions. Update the draft before publishing.",
-        });
+      if (activeQuestions.length !== questionIds.length) {
+        return sendError(
+          res,
+          400,
+          "Some selected questions are inactive, unavailable, or belong to another subject."
+        );
       }
-    } else if (test.status !== "published") {
-      return res.status(400).json({
-        success: false,
-        message: "Only published tests can be closed.",
-      });
     }
 
     test.status = status;
@@ -699,10 +535,83 @@ export async function updateTestStatus(req, res, next) {
       message:
         status === "published"
           ? "Test published successfully."
-          : "Test closed successfully.",
+          : "Test unpublished successfully.",
       test,
     });
   } catch (error) {
+    console.error("updateTestStatus:", error);
+
+    if (
+      error.name === "ValidationError" ||
+      error.name === "CastError"
+    ) {
+      return sendError(res, 400, error.message);
+    }
+
+    next(error);
+  }
+}
+
+// GET /api/tests/:id/results
+export async function getTestResults(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    if (!validateObjectId(id)) {
+      return sendError(res, 400, "Invalid test ID.");
+    }
+
+    const test = await Test.findById(id)
+      .populate("subject", "name code")
+      .select("title subject totalMarks")
+      .lean();
+
+    if (!test) {
+      return sendError(res, 404, "Test not found.");
+    }
+
+    const attempts = await TestAttempt.find({
+      test: id,
+      status: "submitted",
+    })
+      .populate("student", "name email studentId")
+      .sort({ submittedAt: -1 })
+      .lean();
+
+    const students = attempts.map((attempt) => {
+      const totalMarks = attempt.totalMarks ?? test.totalMarks ?? 0;
+      const score = attempt.score ?? 0;
+
+      return {
+        attemptId: attempt._id,
+        studentName: attempt.student?.name || "Unknown student",
+        studentId: attempt.student?.studentId || "—",
+        email: attempt.student?.email || "—",
+        marksObtained: score,
+        totalMarks,
+        percentage:
+          attempt.percentage ??
+          (totalMarks > 0
+            ? Number(((score / totalMarks) * 100).toFixed(2))
+            : 0),
+        attemptNumber: attempt.attemptNumber,
+        submittedAt: attempt.submittedAt,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      test,
+      totalSubmittedAttempts: attempts.length,
+      uniqueStudentsAttempted: new Set(
+        attempts
+          .filter((attempt) => attempt.student?._id)
+          .map((attempt) => String(attempt.student._id))
+      ).size,
+      students,
+    });
+  } catch (error) {
+    console.error("getTestResults:", error);
     next(error);
   }
 }

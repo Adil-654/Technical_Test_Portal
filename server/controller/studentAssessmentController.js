@@ -4,7 +4,6 @@ import Test from "../models/Test.js";
 import TestAttempt from "../models/TestAttempt.js";
 import Question from "../models/Question.js";
 
-// Return a consistent API error response.
 function sendError(res, status, message) {
   return res.status(status).json({
     success: false,
@@ -12,7 +11,6 @@ function sendError(res, status, message) {
   });
 }
 
-// Determine whether a published test is currently within its schedule.
 function isWithinSchedule(test, now = new Date()) {
   if (test.startAt && now < new Date(test.startAt)) {
     return false;
@@ -25,10 +23,11 @@ function isWithinSchedule(test, now = new Date()) {
   return true;
 }
 
-// Never return the answer key or explanation to the student.
+// Never send correctOption or explanations to the student.
 function toStudentAttempt(attempt) {
   return {
-    id: attempt._id,
+    id: String(attempt._id),
+    _id: String(attempt._id),
     test: attempt.test,
     attemptNumber: attempt.attemptNumber,
     status: attempt.status,
@@ -38,10 +37,10 @@ function toStudentAttempt(attempt) {
     totalMarks: attempt.totalMarks,
     score: attempt.score,
     percentage: attempt.percentage,
-    answers: attempt.answers.map((answer) => ({
+    answers: (attempt.answers || []).map((answer) => ({
       question: answer.question,
       questionText: answer.questionText,
-      options: answer.options.map((option) => ({
+      options: (answer.options || []).map((option) => ({
         text: option.text,
       })),
       marks: answer.marks,
@@ -50,19 +49,22 @@ function toStudentAttempt(attempt) {
   };
 }
 
-// Calculate score using the answer key stored in MongoDB.
 function gradeAttempt(attempt, status = "submitted") {
   let score = 0;
 
-  for (const answer of attempt.answers) {
-    if (answer.selectedOption === answer.correctOption) {
-      score += answer.marks;
+  for (const answer of attempt.answers || []) {
+    if (
+      answer.selectedOption !== null &&
+      answer.selectedOption !== undefined &&
+      answer.selectedOption === answer.correctOption
+    ) {
+      score += Number(answer.marks) || 0;
     }
   }
 
   attempt.score = score;
   attempt.percentage =
-    attempt.totalMarks > 0
+    Number(attempt.totalMarks) > 0
       ? Number(((score / attempt.totalMarks) * 100).toFixed(2))
       : 0;
 
@@ -70,8 +72,6 @@ function gradeAttempt(attempt, status = "submitted") {
   attempt.submittedAt = new Date();
 }
 
-// Load an attempt belonging to the logged-in student.
-// Explicitly select the answer key for server-side grading only.
 async function findStudentAttempt(attemptId, studentId) {
   if (!mongoose.isValidObjectId(attemptId)) {
     return null;
@@ -83,18 +83,18 @@ async function findStudentAttempt(attemptId, studentId) {
   }).select("+answers.correctOption");
 }
 
-/* ==================== List Published Tests ==================== */
-
+/* ==================== LIST PUBLISHED ASSESSMENTS ==================== */
 
 export async function getAvailableTests(req, res, next) {
   try {
-    const now = new Date();
     const studentId = req.user._id;
+    const now = new Date();
 
-    // Return every published test, including upcoming and ended tests.
-    const tests = await Test.find({ status: "published" })
+    const tests = await Test.find({
+      status: "published",
+    })
       .select(
-        "title description subject durationMinutes totalMarks startAt endAt attemptsAllowed questions status createdAt"
+        "title name description subject durationMinutes totalMarks startAt endAt attemptsAllowed questions status createdAt"
       )
       .populate("subject", "name code")
       .sort({ createdAt: -1 })
@@ -107,7 +107,7 @@ export async function getAvailableTests(req, res, next) {
           student: studentId,
           test: { $in: testIds },
         })
-          .select("test attemptNumber status expiresAt")
+          .select("test attemptNumber status expiresAt startedAt")
           .sort({ attemptNumber: -1 })
           .lean()
       : [];
@@ -144,38 +144,47 @@ export async function getAvailableTests(req, res, next) {
       const hasEnded =
         Boolean(test.endAt) && now > new Date(test.endAt);
 
-      const withinSchedule = !startsInFuture && !hasEnded;
+      const attemptsAllowed = Number(test.attemptsAllowed ?? 1);
 
       const attemptsRemaining = Math.max(
         0,
-        test.attemptsAllowed - completedAttempts
+        attemptsAllowed - completedAttempts
       );
 
-      // A saved attempt may be resumed only if its deadline has not passed.
       const canResume =
         Boolean(inProgressAttempt) &&
-        new Date(inProgressAttempt.expiresAt) > now;
+        inProgressAttempt.expiresAt &&
+        new Date(inProgressAttempt.expiresAt) > now &&
+        !hasEnded;
 
       const isAvailable =
-        withinSchedule &&
+        !startsInFuture &&
+        !hasEnded &&
         attemptsRemaining > 0;
 
       return {
+        _id: String(test._id),
         id: String(test._id),
-        title: test.title,
-        description: test.description,
-        subject: test.subject,
-        durationMinutes: test.durationMinutes,
-        totalMarks: test.totalMarks,
-        questionCount: test.questions.length,
-        startAt: test.startAt,
-        endAt: test.endAt,
-        attemptsAllowed: test.attemptsAllowed,
+        title: test.title || test.name || "Untitled assessment",
+        name: test.name || test.title || "Untitled assessment",
+        description: test.description || "",
+        subject: test.subject || null,
+        durationMinutes: Number(test.durationMinutes) || 0,
+        totalMarks: Number(test.totalMarks) || 0,
+        questionCount: Array.isArray(test.questions)
+          ? test.questions.length
+          : 0,
+        questions: Array.isArray(test.questions)
+          ? test.questions
+          : [],
+        startAt: test.startAt || null,
+        endAt: test.endAt || null,
+        attemptsAllowed,
         attemptsUsed: completedAttempts,
         attemptsRemaining,
         startsInFuture,
         hasEnded,
-        isAvailable: isAvailable || canResume,
+        isAvailable: Boolean(isAvailable || canResume),
         inProgressAttemptId: canResume
           ? String(inProgressAttempt._id)
           : null,
@@ -188,12 +197,12 @@ export async function getAvailableTests(req, res, next) {
       tests: result,
     });
   } catch (error) {
-    next(error);
+    console.error("getAvailableTests error:", error);
+    return next(error);
   }
 }
 
-
-/* ==================== Start or Resume an Attempt ==================== */
+/* ==================== START OR RESUME ASSESSMENT ==================== */
 
 export async function startTestAttempt(req, res, next) {
   try {
@@ -201,7 +210,7 @@ export async function startTestAttempt(req, res, next) {
     const studentId = req.user._id;
 
     if (!mongoose.isValidObjectId(testId)) {
-      return sendError(res, 400, "Invalid test ID.");
+      return sendError(res, 400, "Invalid assessment ID.");
     }
 
     const test = await Test.findOne({
@@ -214,7 +223,7 @@ export async function startTestAttempt(req, res, next) {
       .populate("subject", "name code");
 
     if (!test) {
-      return sendError(res, 404, "Published test not found.");
+      return sendError(res, 404, "Published assessment not found.");
     }
 
     const now = new Date();
@@ -223,11 +232,10 @@ export async function startTestAttempt(req, res, next) {
       return sendError(
         res,
         400,
-        "This test is not currently available."
+        "This assessment is outside its scheduled availability."
       );
     }
 
-    // Resume an existing attempt rather than creating a duplicate.
     const existingAttempt = await TestAttempt.findOne({
       student: studentId,
       test: test._id,
@@ -253,25 +261,44 @@ export async function startTestAttempt(req, res, next) {
       });
     }
 
+    const attemptsAllowed = Number(test.attemptsAllowed ?? 1);
+
     const completedAttempts = await TestAttempt.countDocuments({
       student: studentId,
       test: test._id,
       status: { $in: ["submitted", "expired"] },
     });
 
-    if (completedAttempts >= test.attemptsAllowed) {
+    if (completedAttempts >= attemptsAllowed) {
       return sendError(
         res,
         403,
-        "You have used all attempts allowed for this test."
+        "You have used all attempts allowed for this assessment."
       );
     }
 
-    // Load the question records from the database, not the browser.
-    const questionIds = test.questions.map(String);
+    if (!test.subject?._id) {
+      return sendError(
+        res,
+        409,
+        "This assessment has no valid subject. Please contact your administrator."
+      );
+    }
+
+    const questionIds = Array.isArray(test.questions)
+      ? test.questions
+      : [];
+
+    if (questionIds.length === 0) {
+      return sendError(
+        res,
+        409,
+        "This assessment has no questions."
+      );
+    }
 
     const questions = await Question.find({
-      _id: { $in: test.questions },
+      _id: { $in: questionIds },
       subject: test.subject._id,
       isActive: true,
     }).select("questionText options correctOption marks");
@@ -283,9 +310,8 @@ export async function startTestAttempt(req, res, next) {
       ])
     );
 
-    // Preserve the order selected by the administrator.
     const orderedQuestions = questionIds.map((id) =>
-      questionMap.get(id)
+      questionMap.get(String(id))
     );
 
     if (
@@ -295,20 +321,29 @@ export async function startTestAttempt(req, res, next) {
       return sendError(
         res,
         409,
-        "Some questions in this test are unavailable. Please contact your administrator."
+        "Some assessment questions are missing, inactive, or assigned to another subject."
       );
     }
 
     const totalMarks = orderedQuestions.reduce(
-      (sum, question) => sum + question.marks,
+      (sum, question) => sum + (Number(question.marks) || 0),
       0
     );
 
+    const durationMinutes = Number(test.durationMinutes);
+
+    if (!Number.isFinite(durationMinutes) || durationMinutes <= 0) {
+      return sendError(
+        res,
+        409,
+        "This assessment has an invalid duration."
+      );
+    }
+
     const expiresAt = new Date(
-      now.getTime() + test.durationMinutes * 60 * 1000
+      now.getTime() + durationMinutes * 60 * 1000
     );
 
-    // A test's closing time can shorten its attempt deadline.
     if (test.endAt && new Date(test.endAt) < expiresAt) {
       expiresAt.setTime(new Date(test.endAt).getTime());
     }
@@ -317,7 +352,7 @@ export async function startTestAttempt(req, res, next) {
       return sendError(
         res,
         400,
-        "There is not enough time remaining to start this test."
+        "There is not enough time remaining to start this assessment."
       );
     }
 
@@ -331,10 +366,10 @@ export async function startTestAttempt(req, res, next) {
       answers: orderedQuestions.map((question) => ({
         question: question._id,
         questionText: question.questionText,
-        options: question.options.map((option) => ({
+        options: (question.options || []).map((option) => ({
           text: option.text,
         })),
-        marks: question.marks,
+        marks: Number(question.marks) || 0,
         correctOption: question.correctOption,
         selectedOption: null,
       })),
@@ -342,15 +377,16 @@ export async function startTestAttempt(req, res, next) {
 
     return res.status(201).json({
       success: true,
-      message: "Test started successfully.",
+      message: "Assessment started successfully.",
       attempt: toStudentAttempt(attempt),
     });
   } catch (error) {
-    next(error);
+    console.error("startTestAttempt error:", error);
+    return next(error);
   }
 }
 
-/* ==================== Get Attempt ==================== */
+/* ==================== GET ATTEMPT ==================== */
 
 export async function getTestAttempt(req, res, next) {
   try {
@@ -360,7 +396,7 @@ export async function getTestAttempt(req, res, next) {
     );
 
     if (!attempt) {
-      return sendError(res, 404, "Test attempt not found.");
+      return sendError(res, 404, "Assessment attempt not found.");
     }
 
     if (
@@ -376,11 +412,69 @@ export async function getTestAttempt(req, res, next) {
       attempt: toStudentAttempt(attempt),
     });
   } catch (error) {
-    next(error);
+    console.error("getTestAttempt error:", error);
+    return next(error);
   }
 }
 
-/* ==================== Save Answers ==================== */
+/* ==================== SAVE ANSWERS ==================== */
+
+function validateAnswers(answers, attempt) {
+  if (!Array.isArray(answers)) {
+    return "Answers must be an array.";
+  }
+
+  const seenQuestions = new Set();
+
+  for (const submittedAnswer of answers) {
+    if (
+      !submittedAnswer ||
+      !mongoose.isValidObjectId(submittedAnswer.questionId)
+    ) {
+      return "Invalid question in submitted answers.";
+    }
+
+    const questionId = String(submittedAnswer.questionId);
+
+    if (seenQuestions.has(questionId)) {
+      return "Duplicate questions were included in the answers.";
+    }
+
+    seenQuestions.add(questionId);
+
+    const answer = attempt.answers.find(
+      (item) => String(item.question) === questionId
+    );
+
+    if (!answer) {
+      return "An answer refers to a question outside this attempt.";
+    }
+
+    const selectedOption = submittedAnswer.selectedOption;
+
+    if (
+      selectedOption !== null &&
+      (!Number.isInteger(selectedOption) ||
+        selectedOption < 0 ||
+        selectedOption >= answer.options.length)
+    ) {
+      return "A selected option is invalid.";
+    }
+  }
+
+  return null;
+}
+
+function applyAnswers(answers, attempt) {
+  for (const submittedAnswer of answers) {
+    const answer = attempt.answers.find(
+      (item) =>
+        String(item.question) === String(submittedAnswer.questionId)
+    );
+
+    answer.selectedOption = submittedAnswer.selectedOption;
+  }
+}
 
 export async function saveTestAnswers(req, res, next) {
   try {
@@ -390,7 +484,7 @@ export async function saveTestAnswers(req, res, next) {
     );
 
     if (!attempt) {
-      return sendError(res, 404, "Test attempt not found.");
+      return sendError(res, 404, "Assessment attempt not found.");
     }
 
     if (attempt.status !== "in_progress") {
@@ -407,66 +501,19 @@ export async function saveTestAnswers(req, res, next) {
 
       return res.status(409).json({
         success: false,
-        message: "Time is up. Your attempt has been submitted.",
+        message: "Time is up. Your attempt has been finalized.",
         attempt: toStudentAttempt(attempt),
       });
     }
 
-    const { answers } = req.body;
+    const { answers } = req.body || {};
+    const validationError = validateAnswers(answers, attempt);
 
-    if (!Array.isArray(answers)) {
-      return sendError(res, 400, "Answers must be an array.");
+    if (validationError) {
+      return sendError(res, 400, validationError);
     }
 
-    for (const submittedAnswer of answers) {
-      if (
-        !submittedAnswer ||
-        !mongoose.isValidObjectId(submittedAnswer.questionId)
-      ) {
-        return sendError(res, 400, "Invalid question in submitted answers.");
-      }
-
-      const answer = attempt.answers.find(
-        (item) =>
-          String(item.question) ===
-          String(submittedAnswer.questionId)
-      );
-
-      if (!answer) {
-        return sendError(
-          res,
-          400,
-          "An answer refers to a question outside this attempt."
-        );
-      }
-
-      const selectedOption = submittedAnswer.selectedOption;
-
-      if (
-        selectedOption !== null &&
-        (!Number.isInteger(selectedOption) ||
-          selectedOption < 0 ||
-          selectedOption >= answer.options.length)
-      ) {
-        return sendError(
-          res,
-          400,
-          "A selected option is invalid."
-        );
-      }
-    }
-
-    // Apply answers only after validating the complete request.
-    for (const submittedAnswer of answers) {
-      const answer = attempt.answers.find(
-        (item) =>
-          String(item.question) ===
-          String(submittedAnswer.questionId)
-      );
-
-      answer.selectedOption = submittedAnswer.selectedOption;
-    }
-
+    applyAnswers(answers, attempt);
     await attempt.save();
 
     return res.status(200).json({
@@ -475,12 +522,12 @@ export async function saveTestAnswers(req, res, next) {
       attempt: toStudentAttempt(attempt),
     });
   } catch (error) {
-    next(error);
+    console.error("saveTestAnswers error:", error);
+    return next(error);
   }
 }
 
-/* ==================== Submit Attempt ==================== */
-
+/* ==================== SUBMIT ATTEMPT ==================== */
 
 export async function submitTestAttempt(req, res, next) {
   try {
@@ -490,7 +537,7 @@ export async function submitTestAttempt(req, res, next) {
     );
 
     if (!attempt) {
-      return sendError(res, 404, "Test attempt not found.");
+      return sendError(res, 404, "Assessment attempt not found.");
     }
 
     if (attempt.status !== "in_progress") {
@@ -501,86 +548,31 @@ export async function submitTestAttempt(req, res, next) {
       });
     }
 
-    // Check the deadline BEFORE accepting final answers.
     const expired = new Date() >= attempt.expiresAt;
+    const answers = req.body?.answers;
 
-    if (!expired && req.body.answers !== undefined) {
-      if (!Array.isArray(req.body.answers)) {
-        return sendError(res, 400, "Answers must be an array.");
+    if (!expired && answers !== undefined) {
+      const validationError = validateAnswers(answers, attempt);
+
+      if (validationError) {
+        return sendError(res, 400, validationError);
       }
 
-      const seenQuestions = new Set();
-
-      // Validate every answer before modifying the attempt.
-      for (const submittedAnswer of req.body.answers) {
-        if (
-          !submittedAnswer ||
-          !mongoose.isValidObjectId(submittedAnswer.questionId)
-        ) {
-          return sendError(res, 400, "Invalid question in submitted answers.");
-        }
-
-        const questionId = String(submittedAnswer.questionId);
-
-        if (seenQuestions.has(questionId)) {
-          return sendError(
-            res,
-            400,
-            "Duplicate questions were included in the submission."
-          );
-        }
-
-        seenQuestions.add(questionId);
-
-        const answer = attempt.answers.find(
-          (item) => String(item.question) === questionId
-        );
-
-        if (!answer) {
-          return sendError(
-            res,
-            400,
-            "An answer refers to a question outside this attempt."
-          );
-        }
-
-        const selectedOption = submittedAnswer.selectedOption;
-
-        if (
-          selectedOption !== null &&
-          (!Number.isInteger(selectedOption) ||
-            selectedOption < 0 ||
-            selectedOption >= answer.options.length)
-        ) {
-          return sendError(res, 400, "A selected option is invalid.");
-        }
-      }
-
-      // Apply only validated answers received before the deadline.
-      for (const submittedAnswer of req.body.answers) {
-        const answer = attempt.answers.find(
-          (item) =>
-            String(item.question) ===
-            String(submittedAnswer.questionId)
-        );
-
-        answer.selectedOption = submittedAnswer.selectedOption;
-      }
+      applyAnswers(answers, attempt);
     }
 
     gradeAttempt(attempt, expired ? "expired" : "submitted");
-
     await attempt.save();
 
     return res.status(200).json({
       success: true,
       message: expired
-        ? "Time expired. Your previously saved answers have been finalized."
-        : "Test submitted successfully.",
+        ? "Time expired. Previously saved answers have been finalized."
+        : "Assessment submitted successfully.",
       attempt: toStudentAttempt(attempt),
     });
   } catch (error) {
-    next(error);
+    console.error("submitTestAttempt error:", error);
+    return next(error);
   }
 }
-

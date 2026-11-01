@@ -231,12 +231,20 @@ function AdminLayout({ user, onLogout }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
+     <Sidebar
+  activePage={activePage}
+  setActivePage={setActivePage}
+  mobileOpen={mobileOpen}
+  setMobileOpen={setMobileOpen}
+  role="student"
+/>
       <Sidebar
-        activePage={activePage}
-        setActivePage={setActivePage}
-        mobileOpen={mobileOpen}
-        setMobileOpen={setMobileOpen}
-      />
+  activePage={activePage}
+  setActivePage={setActivePage}
+  mobileOpen={mobileOpen}
+  setMobileOpen={setMobileOpen}
+  role="admin"
+/>
 
       <div className="min-h-screen lg:pl-64">
         <Topbar

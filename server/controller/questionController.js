@@ -2,10 +2,12 @@
 import mongoose from "mongoose";
 import Question from "../models/Question.js";
 import Subject from "../models/Subject.js";
+import QuestionBank from "../models/QuestionBank.js";
 
 function validateQuestion(body) {
   const {
     subject,
+    questionBank,
     questionText,
     options,
     correctOption,
@@ -17,11 +19,15 @@ function validateQuestion(body) {
   if (
     typeof subject !== "string" ||
     !mongoose.isValidObjectId(subject) ||
+    typeof questionBank !== "string" ||
+    !mongoose.isValidObjectId(questionBank) ||
     typeof questionText !== "string" ||
     !questionText.trim() ||
     questionText.trim().length > 5000
   ) {
-    return { error: "Please provide a valid subject and question." };
+    return {
+      error: "Provide a valid subject, question bank and question.",
+    };
   }
 
   if (
@@ -63,8 +69,11 @@ function validateQuestion(body) {
   return {
     value: {
       subject,
+      questionBank,
       questionText: questionText.trim(),
-      options: options.map((option) => ({ text: option.text.trim() })),
+      options: options.map((option) => ({
+        text: option.text.trim(),
+      })),
       correctOption,
       explanation: explanation.trim(),
       difficulty,
@@ -73,10 +82,16 @@ function validateQuestion(body) {
   };
 }
 
+// GET /api/questions
 export async function getQuestions(req, res, next) {
   try {
-    const { search = "", subject = "", difficulty = "all", status = "all" } =
-      req.query;
+    const {
+      search = "",
+      subject = "",
+      questionBank = "",
+      difficulty = "all",
+      status = "all",
+    } = req.query;
 
     const filter = {};
 
@@ -87,7 +102,19 @@ export async function getQuestions(req, res, next) {
           message: "Invalid subject ID.",
         });
       }
+
       filter.subject = subject;
+    }
+
+    if (questionBank) {
+      if (!mongoose.isValidObjectId(questionBank)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid question bank ID.",
+        });
+      }
+
+      filter.questionBank = questionBank;
     }
 
     if (["easy", "medium", "hard"].includes(difficulty)) {
@@ -99,9 +126,11 @@ export async function getQuestions(req, res, next) {
       });
     }
 
-    if (status === "active") filter.isActive = true;
-    else if (status === "inactive") filter.isActive = false;
-    else if (status !== "all") {
+    if (status === "active") {
+      filter.isActive = true;
+    } else if (status === "inactive") {
+      filter.isActive = false;
+    } else if (status !== "all") {
       return res.status(400).json({
         success: false,
         message: "Invalid status filter.",
@@ -110,12 +139,17 @@ export async function getQuestions(req, res, next) {
 
     if (typeof search === "string" && search.trim()) {
       const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      filter.questionText = { $regex: escaped, $options: "i" };
+
+      filter.questionText = {
+        $regex: escaped,
+        $options: "i",
+      };
     }
 
     const questions = await Question.find(filter)
       .select("-correctOption -explanation")
       .populate("subject", "name code")
+      .populate("questionBank", "name")
       .populate("createdBy", "name")
       .sort({ createdAt: -1 })
       .lean();
@@ -130,6 +164,39 @@ export async function getQuestions(req, res, next) {
   }
 }
 
+// GET /api/questions/:id
+// Admin-only detail endpoint: includes answer and explanation.
+export async function getQuestionById(req, res, next) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid question ID.",
+      });
+    }
+
+    const question = await Question.findById(req.params.id)
+      .populate("subject", "name code")
+      .populate("questionBank", "name")
+      .lean();
+
+    if (!question) {
+      return res.status(404).json({
+        success: false,
+        message: "Question not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      question,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// POST /api/questions
 export async function createQuestion(req, res, next) {
   try {
     const validation = validateQuestion(req.body);
@@ -141,12 +208,31 @@ export async function createQuestion(req, res, next) {
       });
     }
 
-    const subject = await Subject.findById(validation.value.subject);
+    const { subject, questionBank } = validation.value;
 
-    if (!subject || !subject.isActive) {
+    const [subjectDoc, bank] = await Promise.all([
+      Subject.findOne({
+        _id: subject,
+        isActive: true,
+      }),
+      QuestionBank.findOne({
+        _id: questionBank,
+        subject,
+        isActive: true,
+      }),
+    ]);
+
+    if (!subjectDoc) {
       return res.status(400).json({
         success: false,
         message: "Choose an existing active subject.",
+      });
+    }
+
+    if (!bank) {
+      return res.status(400).json({
+        success: false,
+        message: "Choose an active bank belonging to this subject.",
       });
     }
 
@@ -161,6 +247,7 @@ export async function createQuestion(req, res, next) {
       question: {
         _id: question._id,
         subject: question.subject,
+        questionBank: question.questionBank,
         questionText: question.questionText,
         type: question.type,
         options: question.options,
@@ -175,6 +262,7 @@ export async function createQuestion(req, res, next) {
   }
 }
 
+// PATCH /api/questions/:id
 export async function updateQuestion(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -194,8 +282,10 @@ export async function updateQuestion(req, res, next) {
     }
 
     const body = req.body ?? {};
+
     const allowedFields = [
       "subject",
+      "questionBank",
       "questionText",
       "options",
       "correctOption",
@@ -204,11 +294,16 @@ export async function updateQuestion(req, res, next) {
       "marks",
     ];
 
-    const hasContentChange = allowedFields.some((key) => key in body);
+    const hasContentChange = allowedFields.some(
+      (key) => key in body
+    );
 
     if (hasContentChange) {
       const merged = {
         subject: String(body.subject ?? current.subject),
+        questionBank: String(
+          body.questionBank ?? current.questionBank ?? ""
+        ),
         questionText: body.questionText ?? current.questionText,
         options: body.options ?? current.options,
         correctOption: body.correctOption ?? current.correctOption,
@@ -226,12 +321,29 @@ export async function updateQuestion(req, res, next) {
         });
       }
 
-      const subject = await Subject.findById(validation.value.subject);
+      const [subjectDoc, bank] = await Promise.all([
+        Subject.findOne({
+          _id: validation.value.subject,
+          isActive: true,
+        }),
+        QuestionBank.findOne({
+          _id: validation.value.questionBank,
+          subject: validation.value.subject,
+          isActive: true,
+        }),
+      ]);
 
-      if (!subject || !subject.isActive) {
+      if (!subjectDoc) {
         return res.status(400).json({
           success: false,
           message: "Choose an existing active subject.",
+        });
+      }
+
+      if (!bank) {
+        return res.status(400).json({
+          success: false,
+          message: "Choose an active bank belonging to this subject.",
         });
       }
 
@@ -245,6 +357,7 @@ export async function updateQuestion(req, res, next) {
           message: "isActive must be true or false.",
         });
       }
+
       current.isActive = body.isActive;
     }
 
@@ -256,6 +369,7 @@ export async function updateQuestion(req, res, next) {
       question: {
         _id: current._id,
         subject: current.subject,
+        questionBank: current.questionBank,
         questionText: current.questionText,
         type: current.type,
         options: current.options,

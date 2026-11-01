@@ -269,7 +269,7 @@ export default function Subjects() {
             onChange={(event) => setStatus(event.target.value)}
             className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700 outline-none focus:border-indigo-400"
           >
-            <option value="all">All statuses</option>
+            <option value="all">All status</option>
             <option value="active">Active only</option>
             <option value="inactive">Inactive only</option>
           </select>

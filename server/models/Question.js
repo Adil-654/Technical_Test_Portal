@@ -9,6 +9,12 @@ const questionSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    questionBank: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "QuestionBank",
+      default: null,
+      index: true,
+    },
     questionText: {
       type: String,
       required: true,
@@ -78,6 +84,7 @@ const questionSchema = new mongoose.Schema(
 );
 
 questionSchema.index({ subject: 1, difficulty: 1, isActive: 1 });
+questionSchema.index({ questionBank: 1, difficulty: 1, isActive: 1 });
 
 const Question = mongoose.model("Question", questionSchema);
 

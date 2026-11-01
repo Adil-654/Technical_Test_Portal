@@ -364,7 +364,7 @@ export default function QuestionBank() {
             onChange={(event) => setStatusFilter(event.target.value)}
             className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm outline-none focus:border-indigo-400"
           >
-            <option value="all">All statuses</option>
+            <option value="all">All status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
           </select>

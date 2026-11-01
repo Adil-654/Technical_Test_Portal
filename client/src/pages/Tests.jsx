@@ -1,687 +1,1601 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Search,
-  RefreshCw,
-  ClipboardList,
-  Users,
-  CheckCircle2,
+  Calendar,
   Clock,
-  Eye,
-  AlertCircle,
-  LoaderCircle,
-  CalendarDays,
-  BookOpen,
+  FileText,
   Plus,
+  RefreshCw,
+  Search,
+  Send,
   X,
-  Save,
-  Filter,
+  Trash2,
+  PenLine,
+  Library,
+  CheckCircle2,
+  AlertCircle,
+  Power,
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 
-const EMPTY_FORM = {
+const initialForm = {
   title: "",
   description: "",
   subject: "",
   durationMinutes: 30,
+  startAt: "",
+  endAt: "",
+  attemptsAllowed: 1,
   questionIds: [],
-  scheduledAt: "",
 };
 
-export default function Tests() {
-  const navigate = useNavigate();
+const emptyManualQuestion = () => ({
+  questionText: "",
+  options: ["", "", "", ""],
+  correctOption: "0",
+  explanation: "",
+  difficulty: "medium",
+  marks: 1,
+});
 
+const styles = {
+  page: {
+    padding: "24px",
+    color: "#172033",
+    fontFamily: "inherit",
+    minHeight: "100vh",
+    background: "#f8fafc",
+  },
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "16px",
+    flexWrap: "wrap",
+    marginBottom: "24px",
+  },
+  title: {
+    margin: 0,
+    fontSize: "26px",
+    fontWeight: 750,
+  },
+  muted: {
+    color: "#64748b",
+    fontSize: "13px",
+    lineHeight: 1.5,
+  },
+  button: {
+    border: "1px solid #dbe1ea",
+    borderRadius: "8px",
+    padding: "10px 14px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "8px",
+    cursor: "pointer",
+    background: "#fff",
+    color: "#172033",
+    fontSize: "13px",
+    fontWeight: 600,
+  },
+  primary: {
+    background: "#4f46e5",
+    borderColor: "#4f46e5",
+    color: "#fff",
+  },
+  danger: {
+    color: "#b91c1c",
+    borderColor: "#fecaca",
+    background: "#fff",
+  },
+  card: {
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    borderRadius: "12px",
+    padding: "20px",
+  },
+  field: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "7px",
+    minWidth: 0,
+  },
+  label: {
+    fontSize: "13px",
+    fontWeight: 650,
+    color: "#334155",
+  },
+  input: {
+    boxSizing: "border-box",
+    width: "100%",
+    border: "1px solid #cbd5e1",
+    borderRadius: "8px",
+    padding: "10px 12px",
+    background: "#fff",
+    color: "#172033",
+    fontSize: "14px",
+    outlineColor: "#6366f1",
+  },
+  grid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
+    gap: "16px",
+  },
+  tableWrap: {
+    width: "100%",
+    overflowX: "auto",
+  },
+  table: {
+    width: "100%",
+    borderCollapse: "collapse",
+    minWidth: "850px",
+  },
+  th: {
+    textAlign: "left",
+    padding: "13px 12px",
+    background: "#f8fafc",
+    color: "#64748b",
+    fontSize: "11px",
+    textTransform: "uppercase",
+    letterSpacing: ".05em",
+    borderBottom: "1px solid #e2e8f0",
+  },
+  td: {
+    padding: "14px 12px",
+    borderBottom: "1px solid #edf0f5",
+    fontSize: "13px",
+    verticalAlign: "middle",
+  },
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.58)",
+    zIndex: 1000,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "16px",
+  },
+  modal: {
+    width: "100%",
+    maxWidth: "900px",
+    maxHeight: "92vh",
+    overflowY: "auto",
+    background: "#fff",
+    borderRadius: "14px",
+    boxShadow: "0 25px 70px rgba(0,0,0,.25)",
+  },
+  modalHeader: {
+    position: "sticky",
+    top: 0,
+    zIndex: 5,
+    background: "#fff",
+    borderBottom: "1px solid #e2e8f0",
+    padding: "18px 22px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  modalBody: {
+    padding: "22px",
+  },
+  section: {
+    marginBottom: "25px",
+  },
+  sectionTitle: {
+    fontSize: "16px",
+    fontWeight: 750,
+    margin: "0 0 6px",
+  },
+  modeButton: {
+    flex: 1,
+    minWidth: "150px",
+    padding: "16px",
+    borderRadius: "10px",
+    border: "1px solid #e2e8f0",
+    background: "#fff",
+    textAlign: "left",
+    cursor: "pointer",
+    color: "#172033",
+  },
+  questionCard: {
+    border: "1px solid #e2e8f0",
+    borderRadius: "9px",
+    padding: "13px",
+    marginTop: "10px",
+    background: "#fff",
+  },
+  alert: {
+    padding: "11px 14px",
+    borderRadius: "8px",
+    marginBottom: "16px",
+    fontSize: "13px",
+  },
+};
+
+function getId(value) {
+  if (!value) return "";
+  return String(value._id ?? value.id ?? value);
+}
+
+function formatDate(value) {
+  if (!value) return "Not scheduled";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "Invalid date";
+
+  return date.toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.message ||
+    error?.message ||
+    "Something went wrong. Please try again."
+  );
+}
+
+function getCreatedTestId(data) {
+  const test =
+    data?.test ||
+    data?.data?.test ||
+    data?.data ||
+    data;
+
+  return getId(test);
+}
+
+export default function Tests() {
   const [tests, setTests] = useState([]);
   const [subjects, setSubjects] = useState([]);
   const [questions, setQuestions] = useState([]);
 
+  const [form, setForm] = useState(initialForm);
+  const [manualQuestions, setManualQuestions] = useState([]);
+  const [manualDraft, setManualDraft] = useState(emptyManualQuestion);
+
   const [search, setSearch] = useState("");
-  const [subjectFilter, setSubjectFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [questionSearch, setQuestionSearch] = useState("");
 
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [updatingId, setUpdatingId] = useState(null);
-  const [error, setError] = useState("");
-
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [loadingQuestions, setLoadingQuestions] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [createError, setCreateError] = useState("");
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [changingStatus, setChangingStatus] = useState("");
 
-  const fetchSubjects = useCallback(async () => {
+  const [showModal, setShowModal] = useState(false);
+  const [questionMode, setQuestionMode] = useState("manual");
+
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  const loadTests = useCallback(async () => {
+    setLoading(true);
+
+    try {
+      const response = await api.get("/tests");
+      setTests(response.data?.tests ?? []);
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadSubjects = useCallback(async () => {
     try {
       const response = await api.get("/subjects", {
         params: { status: "active" },
       });
 
-      const data = response.data;
-      const list = Array.isArray(data)
-        ? data
-        : data.subjects || data.data || [];
+      const data =
+        response.data?.subjects ??
+        response.data?.data ??
+        [];
 
-      setSubjects(list);
+      setSubjects(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error("Failed to load subjects:", err);
+      setError(getErrorMessage(err));
     }
   }, []);
 
-  const fetchTests = useCallback(
-    async (showRefresh = false) => {
-      try {
-        if (showRefresh) setRefreshing(true);
-        else setLoading(true);
+  useEffect(() => {
+    loadTests();
+    loadSubjects();
+  }, [loadTests, loadSubjects]);
 
-        setError("");
+  useEffect(() => {
+    let cancelled = false;
 
-        const params = {};
-        if (search.trim()) params.search = search.trim();
-        if (subjectFilter) params.subject = subjectFilter;
-        if (statusFilter) params.status = statusFilter;
-
-        const response = await api.get("/tests", { params });
-        const data = response.data;
-        const list = Array.isArray(data)
-          ? data
-          : data.tests || data.data || [];
-
-        setTests(Array.isArray(list) ? list : []);
-      } catch (err) {
-        console.error("Failed to fetch tests:", err);
-        setError(
-          err.response?.data?.message ||
-            "Could not load assessments. Please try again."
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
+    async function loadQuestions() {
+      if (!form.subject) {
+        setQuestions([]);
+        return;
       }
-    },
-    [search, subjectFilter, statusFilter]
-  );
 
-  const fetchQuestions = useCallback(async () => {
-    try {
-      const response = await api.get("/questions", {
-        params: {
-          status: "active",
-          isActive: true,
-          subject: form.subject || undefined,
-        },
-      });
+      setLoadingQuestions(true);
 
-      const data = response.data;
-      const list = Array.isArray(data)
-        ? data
-        : data.questions || data.data || [];
+      try {
+        const response = await api.get("/questions", {
+          params: {
+            subject: form.subject,
+            status: "active",
+          },
+        });
 
-      setQuestions(Array.isArray(list) ? list : []);
-    } catch (err) {
-      console.error("Failed to load questions:", err);
-      setCreateError(
-        err.response?.data?.message ||
-          "Could not load questions. Check your question-bank API."
-      );
+        const data =
+          response.data?.questions ??
+          response.data?.data ??
+          [];
+
+        if (!cancelled) {
+          setQuestions(
+            Array.isArray(data)
+              ? data.filter(
+                  (question) =>
+                    question.isActive !== false &&
+                    getId(question.subject) === form.subject
+                )
+              : []
+          );
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setQuestions([]);
+          setError(getErrorMessage(err));
+        }
+      } finally {
+        if (!cancelled) setLoadingQuestions(false);
+      }
     }
+
+    loadQuestions();
+
+    return () => {
+      cancelled = true;
+    };
   }, [form.subject]);
 
-  useEffect(() => {
-    fetchSubjects();
-  }, [fetchSubjects]);
+  const visibleTests = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
-  useEffect(() => {
-    const timeout = setTimeout(() => fetchTests(), 250);
-    return () => clearTimeout(timeout);
-  }, [fetchTests]);
+    if (!query) return tests;
 
-  useEffect(() => {
-    if (showCreateModal && form.subject) {
-      fetchQuestions();
-    } else {
-      setQuestions([]);
-    }
-  }, [showCreateModal, form.subject, fetchQuestions]);
+    return tests.filter((test) => {
+      const title = String(test.title ?? "").toLowerCase();
+      const subject = String(test.subject?.name ?? "").toLowerCase();
 
-  const openCreateModal = () => {
-    setForm(EMPTY_FORM);
-    setQuestions([]);
-    setCreateError("");
-    setShowCreateModal(true);
-  };
-
-  const closeCreateModal = () => {
-    if (saving) return;
-    setShowCreateModal(false);
-    setCreateError("");
-  };
-
-  const updateForm = (field, value) => {
-    setForm((previous) => ({ ...previous, [field]: value }));
-  };
-
-  const toggleQuestion = (questionId) => {
-    setForm((previous) => {
-      const exists = previous.questionIds.includes(questionId);
-
-      return {
-        ...previous,
-        questionIds: exists
-          ? previous.questionIds.filter((id) => id !== questionId)
-          : [...previous.questionIds, questionId],
-      };
+      return title.includes(query) || subject.includes(query);
     });
-  };
+  }, [tests, search]);
 
-  const handleCreateTest = async (event) => {
-    event.preventDefault();
-    setCreateError("");
+  const visibleQuestions = useMemo(() => {
+    const query = questionSearch.trim().toLowerCase();
 
-    if (!form.title.trim()) {
-      setCreateError("Please enter an assessment title.");
-      return;
-    }
+    if (!query) return questions;
 
-    if (!form.subject) {
-      setCreateError("Please select a subject.");
-      return;
-    }
-
-    if (!Number.isFinite(Number(form.durationMinutes)) ||
-        Number(form.durationMinutes) < 1) {
-      setCreateError("Duration must be at least 1 minute.");
-      return;
-    }
-
-    if (form.questionIds.length === 0) {
-      setCreateError("Select at least one question.");
-      return;
-    }
-
-    const selectedQuestions = questions.filter((question) =>
-      form.questionIds.includes(String(question._id))
+    return questions.filter((question) =>
+      String(question.questionText ?? "")
+        .toLowerCase()
+        .includes(query)
     );
+  }, [questions, questionSearch]);
 
-    const calculatedMarks = selectedQuestions.reduce(
+  const selectedMarks = useMemo(() => {
+    const existingMarks = questions
+      .filter((question) =>
+        form.questionIds.includes(getId(question))
+      )
+      .reduce(
+        (total, question) => total + Number(question.marks || 1),
+        0
+      );
+
+    const manualMarks = manualQuestions.reduce(
       (total, question) => total + Number(question.marks || 1),
       0
     );
 
-    const payload = {
-      title: form.title.trim(),
-      description: form.description.trim(),
-      subject: form.subject,
-      durationMinutes: Number(form.durationMinutes),
-      questionIds: form.questionIds,
-      questionCount: form.questionIds.length,
-      totalMarks: calculatedMarks,
-      status: "draft",
-      ...(form.scheduledAt
-        ? { scheduledAt: new Date(form.scheduledAt).toISOString() }
-        : {}),
-    };
+    return existingMarks + manualMarks;
+  }, [questions, form.questionIds, manualQuestions]);
 
-    try {
-      setSaving(true);
+  function openCreateModal() {
+    setForm(initialForm);
+    setManualQuestions([]);
+    setManualDraft(emptyManualQuestion());
+    setQuestionSearch("");
+    setQuestionMode("manual");
+    setError("");
+    setSuccess("");
+    setShowModal(true);
+  }
 
-      await api.post("/tests", payload);
+  function closeCreateModal() {
+    if (saving) return;
 
-      setShowCreateModal(false);
-      setForm(EMPTY_FORM);
+    setShowModal(false);
+    setError("");
+  }
 
-      await fetchTests(true);
-    } catch (err) {
-      console.error("Failed to create assessment:", err);
+  function updateForm(event) {
+    const { name, value } = event.target;
 
-      setCreateError(
-        err.response?.data?.message ||
-          err.response?.data?.error ||
-          "Could not create assessment. Check the backend validation and request format."
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
+    setForm((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
+  }
 
-  const handleTogglePublish = async (test) => {
-    const isPublished = test.status === "published";
+  function toggleQuestion(questionId) {
+    setForm((previous) => ({
+      ...previous,
+      questionIds: previous.questionIds.includes(questionId)
+        ? previous.questionIds.filter((id) => id !== questionId)
+        : [...previous.questionIds, questionId],
+    }));
+  }
 
-    if (test.status === "closed") {
-      alert("This assessment is closed.");
+  function updateManualDraft(field, value) {
+    setManualDraft((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  }
+
+  function updateManualOption(index, value) {
+    setManualDraft((previous) => ({
+      ...previous,
+      options: previous.options.map((option, optionIndex) =>
+        optionIndex === index ? value : option
+      ),
+    }));
+  }
+
+  function addManualQuestion() {
+    setError("");
+
+    const questionText = manualDraft.questionText.trim();
+    const options = manualDraft.options.map((option) => option.trim());
+    const correctOption = Number(manualDraft.correctOption);
+    const marks = Number(manualDraft.marks);
+
+    if (!form.subject) {
+      setError("Please select a subject first.");
       return;
     }
 
+    if (!questionText) {
+      setError("Please enter the question.");
+      return;
+    }
+
+    if (options.some((option) => !option)) {
+      setError("Please fill all four options.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(correctOption) ||
+      correctOption < 0 ||
+      correctOption > 3
+    ) {
+      setError("Please select the correct answer.");
+      return;
+    }
+
+    if (!Number.isInteger(marks) || marks < 1) {
+      setError("Marks must be a positive whole number.");
+      return;
+    }
+
+    setManualQuestions((previous) => [
+      ...previous,
+      {
+        questionText,
+        options,
+        correctOption,
+        explanation: manualDraft.explanation.trim(),
+        difficulty: manualDraft.difficulty,
+        marks,
+      },
+    ]);
+
+    setManualDraft(emptyManualQuestion());
+  }
+
+  function removeManualQuestion(indexToRemove) {
+    setManualQuestions((previous) =>
+      previous.filter((_, index) => index !== indexToRemove)
+    );
+  }
+
+ 
+async function handleCreateTest(event) {
+  event.preventDefault();
+  setError("");
+  setSuccess("");
+
+  if (!form.title.trim()) {
+    setError("Test title is required.");
+    return;
+  }
+
+  if (!form.subject) {
+    setError("Please select a subject.");
+    return;
+  }
+
+  if (form.questionIds.length === 0 && manualQuestions.length === 0) {
+    setError("Please add at least one question.");
+    return;
+  }
+
+  const durationMinutes = Number(form.durationMinutes);
+  const attemptsAllowed = Number(form.attemptsAllowed);
+
+  if (
+    !Number.isInteger(durationMinutes) ||
+    durationMinutes < 1 ||
+    durationMinutes > 600
+  ) {
+    setError("Duration must be between 1 and 600 minutes.");
+    return;
+  }
+
+  if (
+    !Number.isInteger(attemptsAllowed) ||
+    attemptsAllowed < 1 ||
+    attemptsAllowed > 10
+  ) {
+    setError("Allowed attempts must be between 1 and 10.");
+    return;
+  }
+
+  const startDate = form.startAt ? new Date(form.startAt) : null;
+  const endDate = form.endAt ? new Date(form.endAt) : null;
+
+  if (startDate && Number.isNaN(startDate.getTime())) {
+    setError("Please select a valid start date.");
+    return;
+  }
+
+  if (endDate && Number.isNaN(endDate.getTime())) {
+    setError("Please select a valid end date.");
+    return;
+  }
+
+  if (startDate && endDate && endDate <= startDate) {
+    setError("End date must be after the start date.");
+    return;
+  }
+
+  const payload = {
+    title: form.title.trim(),
+    description: form.description.trim(),
+    subject: form.subject,
+    questionIds: form.questionIds,
+    manualQuestions: manualQuestions.map((question) => ({
+      questionText: question.questionText,
+      options: question.options.map((text) => ({ text })),
+      correctOption: Number(question.correctOption),
+      explanation: question.explanation,
+      difficulty: question.difficulty,
+      marks: Number(question.marks),
+    })),
+    durationMinutes,
+    attemptsAllowed,
+    startAt: startDate ? startDate.toISOString() : null,
+    endAt: endDate ? endDate.toISOString() : null,
+  };
+
+  setSaving(true);
+
+  try {
+    // Create test only. Do not activate it automatically.
+    const response = await api.post("/tests", payload);
+
+    if (!response.data?.success) {
+      throw new Error(
+        response.data?.message || "Failed to create test."
+      );
+    }
+
+    setSuccess("Test created successfully! It is currently deactivated.");
+
+    setShowModal(false);
+    setForm(initialForm);
+    setManualQuestions([]);
+    setManualDraft(emptyManualQuestion());
+    setQuestionSearch("");
+
+    await loadTests();
+  } catch (err) {
+    setError(getErrorMessage(err));
+  } finally {
+    setSaving(false);
+  }
+}
+
+
+  async function handleStatusChange(test) {
+    const id = getId(test);
+    const nextStatus =
+      test.status === "published" ? "draft" : "published";
+
     const confirmed = window.confirm(
-      isPublished
-        ? `Unpublish "${test.title}"? Existing attempts and results should remain preserved.`
-        : `Publish "${test.title}"? Students may be able to access it once published.`
+      nextStatus === "published"
+        ? `Activate "${test.title}"?`
+        : `Deactivate "${test.title}"?`
     );
 
     if (!confirmed) return;
 
-    try {
-      setUpdatingId(String(test._id));
+    setError("");
+    setSuccess("");
+    setChangingStatus(id);
 
-      await api.patch(`/tests/${test._id}/status`, {
-        status: isPublished ? "draft" : "published",
+    try {
+      await api.patch(`/tests/${id}/status`, {
+        status: nextStatus,
       });
 
-      await fetchTests(true);
-    } catch (err) {
-      console.error("Failed to update assessment status:", err);
-      alert(
-        err.response?.data?.message ||
-          `Could not ${isPublished ? "unpublish" : "publish"} this assessment.`
+      setSuccess(
+        nextStatus === "published"
+          ? "Test activated successfully."
+          : "Test deactivated successfully."
       );
+
+      await loadTests();
+    } catch (err) {
+      setError(getErrorMessage(err));
     } finally {
-      setUpdatingId(null);
+      setChangingStatus("");
     }
-  };
+  }
 
-  const getQuestionCount = (test) => {
-    if (test.questionCount != null) return test.questionCount;
-
-    const bankQuestions = Array.isArray(test.questionIds)
-      ? test.questionIds.length
-      : Array.isArray(test.questions)
-      ? test.questions.length
-      : 0;
-
-    const manualQuestions = Array.isArray(test.manualQuestions)
-      ? test.manualQuestions.length
-      : 0;
-
-    return bankQuestions + manualQuestions;
-  };
-
-  const getSubjectName = (test) => {
-    if (test.subject && typeof test.subject === "object") {
-      return test.subject.name || test.subject.code || "—";
-    }
-
-    const subject = subjects.find(
-      (item) => String(item._id) === String(test.subject)
-    );
-
-    return subject?.name || subject?.code || "—";
-  };
-
-  const getAttemptCount = (test) =>
-    Number(
-      test.uniqueStudentsAttempted ??
-        test.studentsAttempted ??
-        test.attemptedStudents ??
-        0
-    );
-
-  const getQuestionText = (question) =>
-    question.questionText ||
-    question.text ||
-    question.title ||
-    "Untitled question";
-
-  const formatDate = (value) => {
-    if (!value) return "—";
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return "—";
-
-    return date.toLocaleDateString("en-GB", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
-  const statusClasses = {
-    published: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-    draft: "bg-slate-100 text-slate-600 ring-slate-500/20",
-    closed: "bg-amber-50 text-amber-700 ring-amber-600/20",
-  };
-
-  const publishedCount = tests.filter(
-    (test) => test.status === "published"
-  ).length;
-
-  const draftCount = tests.filter(
-    (test) => test.status === "draft"
-  ).length;
-
-  const attemptedCount = tests.reduce(
-    (total, test) => total + getAttemptCount(test),
-    0
-  );
-
-  const selectedMarks = questions
-    .filter((question) =>
-      form.questionIds.includes(String(question._id))
-    )
-    .reduce((total, question) => total + Number(question.marks || 1), 0);
+  const selectedQuestionCount =
+    form.questionIds.length + manualQuestions.length;
 
   return (
-    <div className="min-h-full space-y-6 bg-slate-50 p-4 sm:p-6 lg:p-8">
-      {/* Heading */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div style={styles.page}>
+      <div style={styles.header}>
         <div>
-          <p className="text-sm font-medium text-indigo-600">
-            Assessment management
-          </p>
-          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-            All assessments
-          </h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Create, manage, publish, and review your assessments.
+          <h1 style={styles.title}>Assessments</h1>
+          <p style={styles.muted}>
+            Create and manage your student assessments.
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-3">
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           <button
             type="button"
-            onClick={() => fetchTests(true)}
-            disabled={refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-100 disabled:opacity-60"
+            style={styles.button}
+            onClick={loadTests}
+            disabled={loading}
           >
-            <RefreshCw
-              size={16}
-              className={refreshing ? "animate-spin" : ""}
-            />
+            <RefreshCw size={16} />
             Refresh
           </button>
 
           <button
             type="button"
+            style={{ ...styles.button, ...styles.primary }}
             onClick={openCreateModal}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-500/20"
           >
-            <Plus size={18} />
+            <Plus size={17} />
             Create Test
           </button>
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard
-          title="Total assessments"
-          value={tests.length}
-          description="Matching current filters"
-          icon={ClipboardList}
-          iconClass="bg-indigo-50 text-indigo-600"
-        />
-        <SummaryCard
-          title="Published"
-          value={publishedCount}
-          description="Currently published"
-          icon={CheckCircle2}
-          iconClass="bg-emerald-50 text-emerald-600"
-        />
-        <SummaryCard
-          title="Drafts"
-          value={draftCount}
-          description="Not yet published"
-          icon={Clock}
-          iconClass="bg-amber-50 text-amber-600"
-        />
-        <SummaryCard
-          title="Students attempted"
-          value={attemptedCount}
-          description="Across listed assessments"
-          icon={Users}
-          iconClass="bg-sky-50 text-sky-600"
-        />
-      </div>
-
-      {/* Filters */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="relative">
-            <Search
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-            />
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search assessments..."
-              className="w-full rounded-xl border border-slate-200 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
-            />
-          </div>
-
-          <select
-            value={subjectFilter}
-            onChange={(event) => setSubjectFilter(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500"
-          >
-            <option value="">All subjects</option>
-            {subjects.map((subject) => (
-              <option key={subject._id} value={subject._id}>
-                {subject.name || subject.code}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-indigo-500"
-          >
-            <option value="">All statuses</option>
-            <option value="draft">Draft</option>
-            <option value="published">Published</option>
-            <option value="closed">Closed</option>
-          </select>
+      {error && !showModal && (
+        <div
+          role="alert"
+          style={{
+            ...styles.alert,
+            background: "#fef2f2",
+            color: "#b91c1c",
+            border: "1px solid #fecaca",
+          }}
+        >
+          <AlertCircle size={15} style={{ verticalAlign: "middle" }} />{" "}
+          {error}
         </div>
-      </div>
+      )}
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
-          <div>
-            <h2 className="font-semibold text-slate-900">
-              Assessment list
-            </h2>
-            <p className="mt-1 text-sm text-slate-500">
-              {tests.length} {tests.length === 1 ? "test" : "tests"} found
-            </p>
-          </div>
-          {refreshing && (
-            <LoaderCircle
-              size={18}
-              className="animate-spin text-indigo-600"
-            />
-          )}
+      {success && (
+        <div
+          role="status"
+          style={{
+            ...styles.alert,
+            background: "#f0fdf4",
+            color: "#166534",
+            border: "1px solid #bbf7d0",
+          }}
+        >
+          <CheckCircle2 size={15} style={{ verticalAlign: "middle" }} />{" "}
+          {success}
         </div>
+      )}
 
-        {error && (
-          <div className="m-5 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-            <AlertCircle size={18} className="mt-0.5 shrink-0" />
-            <div className="flex-1">
-              <p className="font-semibold">Could not load assessments</p>
-              <p className="mt-1">{error}</p>
+      {/* CREATE TEST MODAL */}
+      {showModal && (
+        <div
+          style={styles.modalOverlay}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              closeCreateModal();
+            }
+          }}
+        >
+          <div
+            style={styles.modal}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-test-heading"
+          >
+            <div style={styles.modalHeader}>
+              <div>
+                <h2
+                  id="create-test-heading"
+                  style={{ margin: 0, fontSize: "19px" }}
+                >
+                  Create New Test
+                </h2>
+                <p style={{ ...styles.muted, margin: "4px 0 0" }}>
+                  Configure your assessment and add questions.
+                </p>
+              </div>
+
               <button
                 type="button"
-                onClick={() => fetchTests(true)}
-                className="mt-2 font-semibold underline"
+                style={styles.button}
+                onClick={closeCreateModal}
+                disabled={saving}
+                aria-label="Close modal"
               >
-                Try again
+                <X size={18} />
               </button>
             </div>
-          </div>
-        )}
 
-        {loading && !error ? (
-          <div className="flex min-h-52 items-center justify-center gap-3 text-sm text-slate-500">
-            <LoaderCircle
-              size={20}
-              className="animate-spin text-indigo-600"
-            />
-            Loading assessments...
+            <form onSubmit={handleCreateTest}>
+              <div style={styles.modalBody}>
+                {error && (
+                  <div
+                    role="alert"
+                    style={{
+                      ...styles.alert,
+                      background: "#fef2f2",
+                      color: "#b91c1c",
+                      border: "1px solid #fecaca",
+                    }}
+                  >
+                    {error}
+                  </div>
+                )}
+
+                {/* TEST DETAILS */}
+                <div style={styles.section}>
+                  <h3 style={styles.sectionTitle}>Test Details</h3>
+                  <p style={styles.muted}>
+                    Enter the basic information about your test.
+                  </p>
+
+                  <div style={styles.grid}>
+                    <div style={styles.field}>
+                      <label style={styles.label} htmlFor="title">
+                        Test title *
+                      </label>
+                      <input
+                        id="title"
+                        name="title"
+                        style={styles.input}
+                        value={form.title}
+                        onChange={updateForm}
+                        placeholder="e.g. DBMS Mid-Sem Test"
+                        maxLength={200}
+                        required
+                      />
+                    </div>
+
+                    <div style={styles.field}>
+                      <label style={styles.label} htmlFor="subject">
+                        Subject *
+                      </label>
+                      <select
+                        id="subject"
+                        name="subject"
+                        style={styles.input}
+                        value={form.subject}
+                        onChange={(event) => {
+                          setForm((previous) => ({
+                            ...previous,
+                            subject: event.target.value,
+                            questionIds: [],
+                          }));
+                          setManualQuestions([]);
+                          setManualDraft(emptyManualQuestion());
+                          setQuestionSearch("");
+                        }}
+                        required
+                      >
+                        <option value="">Select subject</option>
+                        {subjects.map((subject) => (
+                          <option
+                            key={getId(subject)}
+                            value={getId(subject)}
+                          >
+                            {subject.name}
+                            {subject.code ? ` (${subject.code})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={styles.field}>
+                      <label
+                        style={styles.label}
+                        htmlFor="durationMinutes"
+                      >
+                        Duration (minutes) *
+                      </label>
+                      <input
+                        id="durationMinutes"
+                        name="durationMinutes"
+                        type="number"
+                        min="1"
+                        max="600"
+                        style={styles.input}
+                        value={form.durationMinutes}
+                        onChange={updateForm}
+                        required
+                      />
+                    </div>
+
+                    <div style={styles.field}>
+                      <label
+                        style={styles.label}
+                        htmlFor="attemptsAllowed"
+                      >
+                        Allowed attempts *
+                      </label>
+                      <input
+                        id="attemptsAllowed"
+                        name="attemptsAllowed"
+                        type="number"
+                        min="1"
+                        max="10"
+                        style={styles.input}
+                        value={form.attemptsAllowed}
+                        onChange={updateForm}
+                        required
+                      />
+                    </div>
+
+                    <div style={styles.field}>
+                      <label style={styles.label} htmlFor="startAt">
+                        <Calendar size={13} /> Start date and time
+                      </label>
+                      <input
+                        id="startAt"
+                        name="startAt"
+                        type="datetime-local"
+                        style={styles.input}
+                        value={form.startAt}
+                        onChange={updateForm}
+                      />
+                    </div>
+
+                    <div style={styles.field}>
+                      <label style={styles.label} htmlFor="endAt">
+                        <Calendar size={13} /> End date and time
+                      </label>
+                      <input
+                        id="endAt"
+                        name="endAt"
+                        type="datetime-local"
+                        style={styles.input}
+                        value={form.endAt}
+                        onChange={updateForm}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ ...styles.field, marginTop: "16px" }}>
+                    <label style={styles.label} htmlFor="description">
+                      Description
+                    </label>
+                    <textarea
+                      id="description"
+                      name="description"
+                      style={{
+                        ...styles.input,
+                        minHeight: "65px",
+                        resize: "vertical",
+                      }}
+                      value={form.description}
+                      onChange={updateForm}
+                      placeholder="Enter test instructions..."
+                    />
+                  </div>
+                </div>
+
+                {/* QUESTION SELECTION */}
+                <div style={styles.section}>
+                  <h3 style={styles.sectionTitle}>Add Questions</h3>
+                  <p style={styles.muted}>
+                    Choose how you want to add questions to this test.
+                  </p>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: "12px",
+                      flexWrap: "wrap",
+                      marginTop: "15px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setQuestionMode("manual")}
+                      style={{
+                        ...styles.modeButton,
+                        borderColor:
+                          questionMode === "manual" ? "#6366f1" : "#e2e8f0",
+                        background:
+                          questionMode === "manual" ? "#eef2ff" : "#fff",
+                      }}
+                    >
+                      <PenLine
+                        size={22}
+                        color="#4f46e5"
+                        style={{ marginBottom: "9px" }}
+                      />
+                      <strong style={{ display: "block" }}>
+                        Manual Questions
+                      </strong>
+                      <span style={styles.muted}>
+                        Write your own MCQs.
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setQuestionMode("bank")}
+                      style={{
+                        ...styles.modeButton,
+                        borderColor:
+                          questionMode === "bank" ? "#6366f1" : "#e2e8f0",
+                        background:
+                          questionMode === "bank" ? "#eef2ff" : "#fff",
+                      }}
+                    >
+                      <Library
+                        size={22}
+                        color="#4f46e5"
+                        style={{ marginBottom: "9px" }}
+                      />
+                      <strong style={{ display: "block" }}>
+                        Question Bank
+                      </strong>
+                      <span style={styles.muted}>
+                        Select existing questions.
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* MANUAL QUESTION FORM */}
+                {questionMode === "manual" && (
+                  <div style={styles.section}>
+                    <div
+                      style={{
+                        padding: "16px",
+                        border: "1px solid #e2e8f0",
+                        borderRadius: "10px",
+                      }}
+                    >
+                      <h4 style={{ margin: "0 0 14px", fontSize: "15px" }}>
+                        Write MCQ
+                      </h4>
+
+                      {!form.subject && (
+                        <p style={{ ...styles.muted, color: "#b45309" }}>
+                          Please select a subject in Test Details first.
+                        </p>
+                      )}
+
+                      <div style={styles.field}>
+                        <label style={styles.label}>
+                          Question *
+                        </label>
+                        <textarea
+                          style={{
+                            ...styles.input,
+                            minHeight: "75px",
+                            resize: "vertical",
+                          }}
+                          value={manualDraft.questionText}
+                          onChange={(event) =>
+                            updateManualDraft(
+                              "questionText",
+                              event.target.value
+                            )
+                          }
+                          placeholder="Enter your question..."
+                        />
+                      </div>
+
+                      <div style={{ ...styles.grid, marginTop: "14px" }}>
+                        {manualDraft.options.map((option, index) => (
+                          <div style={styles.field} key={index}>
+                            <label style={styles.label}>
+                              Option {String.fromCharCode(65 + index)} *
+                            </label>
+                            <input
+                              style={styles.input}
+                              value={option}
+                              onChange={(event) =>
+                                updateManualOption(index, event.target.value)
+                              }
+                              placeholder={`Enter option ${String.fromCharCode(
+                                65 + index
+                              )}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div style={{ ...styles.grid, marginTop: "14px" }}>
+                        <div style={styles.field}>
+                          <label style={styles.label}>
+                            Correct answer *
+                          </label>
+                          <select
+                            style={styles.input}
+                            value={manualDraft.correctOption}
+                            onChange={(event) =>
+                              updateManualDraft(
+                                "correctOption",
+                                event.target.value
+                              )
+                            }
+                          >
+                            {manualDraft.options.map((option, index) => (
+                              <option key={index} value={String(index)}>
+                                {String.fromCharCode(65 + index)}
+                                {option.trim() ? ` - ${option}` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div style={styles.field}>
+                          <label style={styles.label}>Difficulty</label>
+                          <select
+                            style={styles.input}
+                            value={manualDraft.difficulty}
+                            onChange={(event) =>
+                              updateManualDraft(
+                                "difficulty",
+                                event.target.value
+                              )
+                            }
+                          >
+                            <option value="easy">Easy</option>
+                            <option value="medium">Medium</option>
+                            <option value="hard">Hard</option>
+                          </select>
+                        </div>
+
+                        <div style={styles.field}>
+                          <label style={styles.label}>Marks</label>
+                          <input
+                            type="number"
+                            min="1"
+                            step="1"
+                            style={styles.input}
+                            value={manualDraft.marks}
+                            onChange={(event) =>
+                              updateManualDraft("marks", event.target.value)
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <div style={{ ...styles.field, marginTop: "14px" }}>
+                        <label style={styles.label}>
+                          Explanation (optional)
+                        </label>
+                        <textarea
+                          style={{
+                            ...styles.input,
+                            minHeight: "55px",
+                            resize: "vertical",
+                          }}
+                          value={manualDraft.explanation}
+                          onChange={(event) =>
+                            updateManualDraft(
+                              "explanation",
+                              event.target.value
+                            )
+                          }
+                          placeholder="Explain the correct answer..."
+                        />
+                      </div>
+
+                      <button
+                        type="button"
+                        style={{
+                          ...styles.button,
+                          ...styles.primary,
+                          marginTop: "15px",
+                        }}
+                        onClick={addManualQuestion}
+                        disabled={!form.subject}
+                      >
+                        <Plus size={16} />
+                        Add Question
+                      </button>
+                    </div>
+
+                    {manualQuestions.length > 0 && (
+                      <div style={{ marginTop: "18px" }}>
+                        <strong>
+                          Added Questions ({manualQuestions.length})
+                        </strong>
+
+                        {manualQuestions.map((question, index) => (
+                          <div key={index} style={styles.questionCard}>
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                gap: "12px",
+                              }}
+                            >
+                              <div style={{ flex: 1 }}>
+                                <strong>
+                                  Q{index + 1}. {question.questionText}
+                                </strong>
+
+                                <ol
+                                  type="A"
+                                  style={{
+                                    paddingLeft: "22px",
+                                    fontSize: "13px",
+                                  }}
+                                >
+                                  {question.options.map((option, optionIndex) => (
+                                    <li key={optionIndex}>
+                                      {option}
+                                      {optionIndex === question.correctOption && (
+                                        <strong style={{ color: "#15803d" }}>
+                                          {" "}✓ Correct
+                                        </strong>
+                                      )}
+                                    </li>
+                                  ))}
+                                </ol>
+
+                                <span style={styles.muted}>
+                                  {question.difficulty} · {question.marks} mark(s)
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                style={{
+                                  ...styles.button,
+                                  ...styles.danger,
+                                  padding: "7px",
+                                  height: "34px",
+                                }}
+                                onClick={() => removeManualQuestion(index)}
+                                aria-label={`Remove question ${index + 1}`}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* QUESTION BANK */}
+                {questionMode === "bank" && (
+                  <div style={styles.section}>
+                    {!form.subject ? (
+                      <p style={styles.muted}>
+                        Select a subject in Test Details to view its questions.
+                      </p>
+                    ) : (
+                      <>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            flexWrap: "wrap",
+                            marginBottom: "12px",
+                          }}
+                        >
+                          <strong>Available Questions</strong>
+
+                          <input
+                            style={{
+                              ...styles.input,
+                              maxWidth: "250px",
+                            }}
+                            value={questionSearch}
+                            onChange={(event) =>
+                              setQuestionSearch(event.target.value)
+                            }
+                            placeholder="Search questions..."
+                          />
+                        </div>
+
+                        {loadingQuestions ? (
+                          <p style={styles.muted}>Loading questions...</p>
+                        ) : visibleQuestions.length === 0 ? (
+                          <p style={styles.muted}>
+                            No active questions found for this subject.
+                          </p>
+                        ) : (
+                          <div
+                            style={{
+                              border: "1px solid #e2e8f0",
+                              borderRadius: "9px",
+                              maxHeight: "300px",
+                              overflowY: "auto",
+                            }}
+                          >
+                            {visibleQuestions.map((question) => {
+                              const id = getId(question);
+                              const checked =
+                                form.questionIds.includes(id);
+
+                              return (
+                                <label
+                                  key={id}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "flex-start",
+                                    gap: "12px",
+                                    padding: "13px",
+                                    borderBottom: "1px solid #edf0f5",
+                                    cursor: "pointer",
+                                    background: checked ? "#eef2ff" : "#fff",
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleQuestion(id)}
+                                    style={{ marginTop: "4px" }}
+                                  />
+
+                                  <span style={{ flex: 1 }}>
+                                    <span
+                                      style={{
+                                        display: "block",
+                                        fontSize: "13px",
+                                        lineHeight: 1.5,
+                                      }}
+                                    >
+                                      {question.questionText ||
+                                        "Untitled question"}
+                                    </span>
+
+                                    <span style={styles.muted}>
+                                      {question.difficulty || "Unspecified"}
+                                      {" · "}
+                                      {Number(question.marks || 1)} mark(s)
+                                    </span>
+                                  </span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* SELECTED QUESTIONS SUMMARY */}
+                <div
+                  style={{
+                    padding: "15px",
+                    borderRadius: "9px",
+                    background: "#eef2ff",
+                    border: "1px solid #c7d2fe",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                  }}
+                >
+                  <div>
+                    <strong>{selectedQuestionCount} Questions Selected</strong>
+                    <p style={{ ...styles.muted, margin: "4px 0 0" }}>
+                      {form.questionIds.length} from bank ·{" "}
+                      {manualQuestions.length} manual
+                    </p>
+                  </div>
+
+                  <div style={{ textAlign: "right" }}>
+                    <strong>{selectedMarks} Marks</strong>
+                    <p style={{ ...styles.muted, margin: "4px 0 0" }}>
+                      Total assessment marks
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* MODAL FOOTER */}
+              <div
+                style={{
+                  position: "sticky",
+                  bottom: 0,
+                  background: "#fff",
+                  borderTop: "1px solid #e2e8f0",
+                  padding: "15px 22px",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  style={styles.button}
+                  onClick={closeCreateModal}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  style={{ ...styles.button, ...styles.primary }}
+                  disabled={saving || !form.subject}
+                >
+                  {saving ? (
+                    <>
+                      <RefreshCw size={15} />
+                      Creating & Activating...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={16} />
+                      Create Test
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
-        ) : !error && tests.length === 0 ? (
-          <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
-            <ClipboardList size={30} className="text-slate-400" />
-            <h3 className="mt-4 font-semibold text-slate-900">
-              No assessments found
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Change the filters or create your first test.
+        </div>
+      )}
+
+      {/* ASSESSMENTS TABLE */}
+      <section style={styles.card}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "16px",
+            flexWrap: "wrap",
+            marginBottom: "18px",
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0, fontSize: "18px" }}>
+              All Assessments
+            </h2>
+            <p style={styles.muted}>
+              {visibleTests.length} test(s) found
             </p>
+          </div>
+
+          <div style={{ position: "relative", minWidth: "230px" }}>
+            <Search
+              size={16}
+              style={{
+                position: "absolute",
+                left: "11px",
+                top: "12px",
+                color: "#64748b",
+              }}
+            />
+            <input
+              aria-label="Search assessments"
+              style={{
+                ...styles.input,
+                paddingLeft: "35px",
+              }}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search tests..."
+            />
+          </div>
+        </div>
+
+        {loading ? (
+          <p style={styles.muted}>Loading assessments...</p>
+        ) : visibleTests.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "45px 12px" }}>
+            <FileText
+              size={38}
+              color="#94a3b8"
+              style={{ marginBottom: "10px" }}
+            />
+
+            <h3 style={{ margin: "0 0 7px", fontSize: "16px" }}>
+              No assessments yet
+            </h3>
+
+            <p style={styles.muted}>
+              Create your first test to get started.
+            </p>
+
             <button
               type="button"
+              style={{
+                ...styles.button,
+                ...styles.primary,
+                marginTop: "10px",
+              }}
               onClick={openCreateModal}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
             >
-              <Plus size={17} />
-              Create Test
+              <Plus size={16} />
+              Create Your First Test
             </button>
           </div>
-        ) : !error ? (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1120px] text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wider text-slate-500">
+        ) : (
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <thead>
                 <tr>
-                  <th className="px-5 py-4 font-semibold">Assessment</th>
-                  <th className="px-5 py-4 font-semibold">Subject</th>
-                  <th className="px-5 py-4 font-semibold">Questions</th>
-                  <th className="px-5 py-4 font-semibold">Duration</th>
-                  <th className="px-5 py-4 font-semibold">Schedule</th>
-                  <th className="px-5 py-4 font-semibold">Status</th>
-                  <th className="px-5 py-4 font-semibold">
-                    Students attempted
-                  </th>
-                  <th className="px-5 py-4 font-semibold">Results</th>
+                  <th style={styles.th}>Test</th>
+                  <th style={styles.th}>Subject</th>
+                  <th style={styles.th}>Questions</th>
+                  <th style={styles.th}>Duration</th>
+                  <th style={styles.th}>Start</th>
+                  <th style={styles.th}>End</th>
+                  <th style={styles.th}>Status</th>
+                  <th style={styles.th}>Action</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {tests.map((test) => {
-                  const isPublished = test.status === "published";
-                  const isUpdating = updatingId === String(test._id);
-                  const attempts = getAttemptCount(test);
+
+              <tbody>
+                {visibleTests.map((test) => {
+                  const id = getId(test);
+                  const isActive = test.status === "published";
+                  const isClosed = test.status === "closed";
 
                   return (
-                    <tr
-                      key={test._id}
-                      className="transition hover:bg-slate-50/80"
-                    >
-                      <td className="px-5 py-4">
-                        <div className="flex items-start gap-3">
-                          <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600">
-                            <BookOpen size={19} />
+                    <tr key={id}>
+                      <td style={styles.td}>
+                        <strong>
+                          {test.title || "Untitled test"}
+                        </strong>
+
+                        {test.description && (
+                          <div style={styles.muted}>
+                            {test.description}
                           </div>
-                          <div>
-                            <p className="font-semibold text-slate-900">
-                              {test.title || "Untitled assessment"}
-                            </p>
-                            <p className="mt-1 max-w-xs truncate text-xs text-slate-500">
-                              {test.description || "No description"}
-                            </p>
-                          </div>
+                        )}
+                      </td>
+
+                      <td style={styles.td}>
+                        {test.subject?.name || "—"}
+                      </td>
+
+                      <td style={styles.td}>
+                        {test.questionCount ??
+                          test.questionIds?.length ??
+                          0}
+                        <div style={styles.muted}>
+                          {test.totalMarks ?? 0} marks
                         </div>
                       </td>
 
-                      <td className="px-5 py-4 font-medium text-slate-700">
-                        {getSubjectName(test)}
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                          }}
+                        >
+                          <Clock size={14} />
+                          {test.durationMinutes} min
+                        </span>
                       </td>
 
-                      <td className="px-5 py-4 text-slate-700">
-                        {getQuestionCount(test)}
+                      <td style={styles.td}>
+                        {formatDate(test.startAt)}
                       </td>
 
-                      <td className="whitespace-nowrap px-5 py-4 text-slate-700">
-                        {test.durationMinutes ?? test.duration ?? "—"}
-                        {(test.durationMinutes ?? test.duration) != null
-                          ? " min"
-                          : ""}
+                      <td style={styles.td}>
+                        {formatDate(test.endAt)}
                       </td>
 
-                      <td className="whitespace-nowrap px-5 py-4">
-                        <div className="flex items-center gap-2 text-slate-600">
-                          <CalendarDays
-                            size={15}
-                            className="text-slate-400"
-                          />
-                          {formatDate(
-                            test.scheduledAt ||
-                              test.startDate ||
-                              test.createdAt
-                          )}
-                        </div>
-                      </td>
-
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-3">
+                      <td style={styles.td}>
+                        <span
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            borderRadius: "20px",
+                            padding: "5px 10px",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            background: isActive
+                              ? "#dcfce7"
+                              : isClosed
+                                ? "#fee2e2"
+                                : "#f1f5f9",
+                            color: isActive
+                              ? "#166534"
+                              : isClosed
+                                ? "#991b1b"
+                                : "#475569",
+                          }}
+                        >
                           <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 ring-inset ${
-                              statusClasses[test.status] ||
-                              statusClasses.draft
-                            }`}
-                          >
-                            {test.status || "draft"}
-                          </span>
+                            style={{
+                              width: "6px",
+                              height: "6px",
+                              borderRadius: "50%",
+                              background: "currentColor",
+                            }}
+                          />
+                          {isActive
+                            ? "Active"
+                            : isClosed
+                              ? "Closed"
+                              : "Draft"}
+                        </span>
+                      </td>
 
+                      <td style={styles.td}>
+                        {isClosed ? (
+                          <span style={styles.muted}>Closed</span>
+                        ) : (
                           <button
                             type="button"
-                            role="switch"
-                            aria-checked={isPublished}
-                            aria-label={`${
-                              isPublished ? "Unpublish" : "Publish"
-                            } ${test.title || "assessment"}`}
-                            title={
-                              isPublished
-                                ? "Unpublish assessment"
-                                : "Publish assessment"
-                            }
-                            disabled={
-                              isUpdating || test.status === "closed"
-                            }
-                            onClick={() => handleTogglePublish(test)}
-                            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-4 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50 ${
-                              isPublished
-                                ? "bg-emerald-600"
-                                : "bg-slate-300"
-                            }`}
+                            style={{
+                              ...styles.button,
+                              padding: "7px 10px",
+                              fontSize: "12px",
+                              ...(isActive
+                                ? styles.danger
+                                : styles.primary),
+                            }}
+                            disabled={changingStatus === id}
+                            onClick={() => handleStatusChange(test)}
                           >
-                            {isUpdating ? (
-                              <LoaderCircle
-                                size={15}
-                                className="absolute left-1/2 -translate-x-1/2 animate-spin text-white"
-                              />
-                            ) : (
-                              <span
-                                className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform ${
-                                  isPublished
-                                    ? "translate-x-6"
-                                    : "translate-x-1"
-                                }`}
-                              />
-                            )}
+                            <Power size={14} />
+                            {changingStatus === id
+                              ? "Updating..."
+                              : isActive
+                                ? "Deactivate"
+                                : "Activate"}
                           </button>
-                        </div>
-                      </td>
-
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          <Users size={16} className="text-slate-400" />
-                          <span className="font-semibold tabular-nums text-slate-800">
-                            {attempts}
-                          </span>
-                          <span className="text-xs text-slate-500">
-                            {attempts === 1 ? "student" : "students"}
-                          </span>
-                        </div>
-                      </td>
-
-                      <td className="px-5 py-4">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            navigate(`/admin/tests/${test._id}/results`)
-                          }
-                          className="inline-flex items-center gap-2 whitespace-nowrap rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-50"
-                        >
-                          <Eye size={15} />
-                          View Results
-                        </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -689,274 +1603,8 @@ export default function Tests() {
               </tbody>
             </table>
           </div>
-        ) : null}
-
-        <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-3 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <span>Showing {tests.length} assessments</span>
-          <span>New assessments are saved as drafts.</span>
-        </div>
-      </div>
-
-      {/* Create test modal */}
-      {showCreateModal && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/50 p-3 backdrop-blur-sm sm:p-6"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closeCreateModal();
-            }
-          }}
-        >
-          <div className="my-auto flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
-            <div className="flex items-start justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">
-                  Create assessment
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Set the test details and choose questions from your question bank.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeCreateModal}
-                disabled={saving}
-                aria-label="Close create assessment form"
-                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 disabled:opacity-50"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <form
-              onSubmit={handleCreateTest}
-              className="flex min-h-0 flex-1 flex-col"
-            >
-              <div className="space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
-                {createError && (
-                  <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                    <AlertCircle
-                      size={18}
-                      className="mt-0.5 shrink-0"
-                    />
-                    <span>{createError}</span>
-                  </div>
-                )}
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                    Assessment title *
-                  </label>
-                  <input
-                    required
-                    maxLength={150}
-                    value={form.title}
-                    onChange={(event) =>
-                      updateForm("title", event.target.value)
-                    }
-                    placeholder="e.g. Data Structures Mid-Sem Test"
-                    className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
-                  />
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                    Description
-                  </label>
-                  <textarea
-                    rows={2}
-                    maxLength={1000}
-                    value={form.description}
-                    onChange={(event) =>
-                      updateForm("description", event.target.value)
-                    }
-                    placeholder="Add instructions or a short description..."
-                    className="w-full resize-y rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Subject *
-                    </label>
-                    <select
-                      required
-                      value={form.subject}
-                      onChange={(event) => {
-                        updateForm("subject", event.target.value);
-                        updateForm("questionIds", []);
-                        setCreateError("");
-                      }}
-                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none focus:border-indigo-500"
-                    >
-                      <option value="">Select subject</option>
-                      {subjects.map((subject) => (
-                        <option key={subject._id} value={subject._id}>
-                          {subject.name || subject.code}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                      Duration (minutes) *
-                    </label>
-                    <input
-                      required
-                      type="number"
-                      min="1"
-                      max="600"
-                      value={form.durationMinutes}
-                      onChange={(event) =>
-                        updateForm("durationMinutes", event.target.value)
-                      }
-                      className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="mb-1.5 block text-sm font-semibold text-slate-700">
-                    Scheduled date and time (optional)
-                  </label>
-                  <input
-                    type="datetime-local"
-                    value={form.scheduledAt}
-                    onChange={(event) =>
-                      updateForm("scheduledAt", event.target.value)
-                    }
-                    className="w-full rounded-xl border border-slate-200 px-3.5 py-3 text-sm outline-none focus:border-indigo-500"
-                  />
-                  <p className="mt-1.5 text-xs text-slate-500">
-                    The assessment will be created as a draft regardless of this date.
-                  </p>
-                </div>
-
-                <div className="overflow-hidden rounded-xl border border-slate-200">
-                  <div className="flex flex-col gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <h3 className="text-sm font-semibold text-slate-900">
-                        Select questions *
-                      </h3>
-                      <p className="mt-1 text-xs text-slate-500">
-                        Choose questions for the selected subject.
-                      </p>
-                    </div>
-                    <div className="text-sm font-semibold text-indigo-700">
-                      {form.questionIds.length} selected · {selectedMarks} marks
-                    </div>
-                  </div>
-
-                  {!form.subject ? (
-                    <div className="px-4 py-8 text-center text-sm text-slate-500">
-                      Select a subject first to load its questions.
-                    </div>
-                  ) : questions.length === 0 ? (
-                    <div className="px-4 py-8 text-center text-sm text-slate-500">
-                      No questions returned. Add active questions to this subject in the question bank.
-                    </div>
-                  ) : (
-                    <div className="max-h-72 divide-y divide-slate-100 overflow-y-auto">
-                      {questions.map((question) => {
-                        const id = String(question._id);
-                        const selected = form.questionIds.includes(id);
-
-                        return (
-                          <label
-                            key={id}
-                            className={`flex cursor-pointer items-start gap-3 px-4 py-3 transition hover:bg-slate-50 ${
-                              selected ? "bg-indigo-50/60" : "bg-white"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selected}
-                              onChange={() => toggleQuestion(id)}
-                              className="mt-1 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="block text-sm font-medium text-slate-800">
-                                {getQuestionText(question)}
-                              </span>
-                              <span className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                                <span>
-                                  {Number(question.marks || 1)} marks
-                                </span>
-                                {question.difficulty && (
-                                  <span className="capitalize">
-                                    {question.difficulty}
-                                  </span>
-                                )}
-                              </span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex flex-col-reverse gap-3 border-t border-slate-100 bg-white px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                <p className="text-xs text-slate-500">
-                  Assessment will be saved as a draft.
-                </p>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={closeCreateModal}
-                    disabled={saving}
-                    className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {saving ? (
-                      <LoaderCircle size={17} className="animate-spin" />
-                    ) : (
-                      <Save size={17} />
-                    )}
-                    {saving ? "Creating..." : "Create Test"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SummaryCard({
-  title,
-  value,
-  description,
-  icon: Icon,
-  iconClass,
-}) {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-            {value}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">{description}</p>
-        </div>
-        <div
-          className={`flex h-11 w-11 items-center justify-center rounded-xl ${iconClass}`}
-        >
-          <Icon size={21} />
-        </div>
-      </div>
+        )}
+      </section>
     </div>
   );
 }

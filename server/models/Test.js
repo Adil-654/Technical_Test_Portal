@@ -1,112 +1,88 @@
 import mongoose from "mongoose";
 
-const manualQuestionSchema = new mongoose.Schema(
-  {
-    questionText: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-    type: {
-      type: String,
-      enum: ["MCQ", "TRUE_FALSE"],
-      default: "MCQ",
-    },
-    options: {
-      type: [String],
-      default: [],
-    },
-    correctAnswer: {
-      type: String,
-      required: true,
-    },
-    marks: {
-      type: Number,
-      required: true,
-      min: 1,
-      default: 1,
-    },
-    difficulty: {
-      type: String,
-      enum: ["easy", "medium", "hard"],
-      default: "medium",
-    },
-    explanation: {
-      type: String,
-      default: "",
-    },
-  },
-  { _id: true }
-);
-
 const testSchema = new mongoose.Schema(
   {
     title: {
       type: String,
-      required: true,
+      required: [true, "Test title is required."],
       trim: true,
-      maxlength: 150,
+      maxlength: 200,
     },
+
     description: {
       type: String,
       default: "",
-      maxlength: 1000,
+      trim: true,
     },
+
     subject: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Subject",
-      required: true,
+      required: [true, "Subject is required."],
     },
+
     questionIds: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Question",
       },
     ],
-    manualQuestions: {
-      type: [manualQuestionSchema],
-      default: [],
-    },
+
     durationMinutes: {
       type: Number,
-      required: true,
+      required: [true, "Test duration is required."],
       min: 1,
       max: 600,
-      default: 30,
     },
-    attemptsAllowed: {
-      type: Number,
-      min: 1,
-      max: 10,
-      default: 1,
-    },
+
+    // Date and time when students can start the test.
     startAt: {
       type: Date,
       default: null,
     },
+
+    // Date and time when the test closes.
     endAt: {
       type: Date,
       default: null,
     },
+
+    attemptsAllowed: {
+      type: Number,
+      default: 1,
+      min: 1,
+      max: 10,
+    },
+
+    questionCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    totalMarks: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
     status: {
       type: String,
       enum: ["draft", "published", "closed"],
       default: "draft",
     },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-    },
-    questionCount: {
-      type: Number,
-      default: 0,
-    },
-    totalMarks: {
-      type: Number,
-      default: 0,
+      default: null,
     },
   },
-  { timestamps: true }
+  {
+    timestamps: true,
+  }
 );
 
-export default mongoose.model("Test", testSchema);
+const Test = mongoose.model("Test", testSchema);
+
+export default Test;
