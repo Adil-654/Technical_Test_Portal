@@ -6,6 +6,7 @@ import {
   Route,
   Routes,
   useLocation,
+  useNavigate,
 } from "react-router-dom";
 
 import {
@@ -16,9 +17,16 @@ import {
   LogOut,
   Menu,
   X,
+  GraduationCap,
+  ChevronRight,
+  Sparkles,
+  Target,
+  BookOpen,
 } from "lucide-react";
 
 import StudentDashboard from "../pages/StudentDashboard";
+import StudentExam from "../pages/StudentExam";
+import api from "../services/api";
 
 const navigation = [
   {
@@ -37,7 +45,7 @@ const navigation = [
     icon: Library,
   },
   {
-    label: "Results",
+    label: "My Results",
     path: "/student/results",
     icon: ChartNoAxesColumn,
   },
@@ -45,123 +53,251 @@ const navigation = [
 
 export default function StudentLayout({ user, onLogout }) {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [mobileOpen, setMobileOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [startingTest, setStartingTest] = useState(false);
+  const [startError, setStartError] = useState("");
 
-  const activePage =
-    navigation.find((item) => item.path === location.pathname)?.label ||
-    "Dashboard";
+  const isExamPage = location.pathname.startsWith("/student/exam/");
+
+  const activePage = isExamPage
+    ? "Assessment in Progress"
+    : navigation.find((item) => item.path === location.pathname)?.label ||
+      "Dashboard";
+
+  const studentName = user?.name || "Student";
+
+  const initials = studentName
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+
+  async function handleStartTest(test) {
+    if (!test?._id && !test?.id) {
+      setStartError("Invalid assessment. Please refresh and try again.");
+      return;
+    }
+
+    if (startingTest) return;
+
+    setStartingTest(true);
+    setStartError("");
+
+    try {
+      const testId = test._id || test.id;
+
+      const response = await api.post(
+        `/student-assessments/${testId}/start`
+      );
+
+      const attempt = response.data?.attempt;
+
+      if (!attempt?._id && !attempt?.id) {
+        throw new Error("The server did not return a valid attempt.");
+      }
+
+      const attemptId = attempt._id || attempt.id;
+
+      if (attempt.status !== "in_progress") {
+        navigate("/student/results");
+        return;
+      }
+
+      navigate(`/student/exam/${attemptId}`);
+    } catch (error) {
+      setStartError(
+        error.response?.data?.message ||
+          error.message ||
+          "Unable to start this assessment."
+      );
+    } finally {
+      setStartingTest(false);
+    }
+  }
+
+  function handleNavigate(destination) {
+    const paths = {
+      tests: "/student/assessments",
+      assessments: "/student/assessments",
+      dashboard: "/student/dashboard",
+      results: "/student/results",
+      "question-bank": "/student/question-bank",
+    };
+
+    navigate(paths[destination] || "/student/dashboard");
+  }
+
+  function closeMobileMenu() {
+    setMobileOpen(false);
+  }
+
+  if (isExamPage) {
+    return (
+      <Routes>
+        <Route path="exam/:attemptId" element={<StudentExam />} />
+      </Routes>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-[#F5F7FC] text-slate-800">
+
       {/* Mobile overlay */}
       {mobileOpen && (
         <button
           type="button"
           aria-label="Close navigation"
-          onClick={() => setMobileOpen(false)}
-          className="fixed inset-0 z-30 bg-slate-950/50 lg:hidden"
+          onClick={closeMobileMenu}
+          className="fixed inset-0 z-40 bg-[#101B3C]/60 backdrop-blur-sm lg:hidden"
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 w-64 transform border-r border-slate-200 bg-white transition-transform duration-200 lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col overflow-y-auto border-r border-white/10 bg-[#19284F] text-white shadow-2xl transition-transform duration-300 ${
           mobileOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        } lg:translate-x-0`}
       >
+
         {/* Brand */}
-        <div className="flex h-20 items-center justify-between border-b border-slate-100 px-6">
-          <div>
-            <h1 className="text-xl font-extrabold tracking-tight text-indigo-700">
-              TestPilot
-            </h1>
-            <p className="mt-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
-              Assessment Platform
-            </p>
+        <div className="flex h-[76px] shrink-0 items-center justify-between border-b border-white/[0.08] px-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FF7417] text-white shadow-lg shadow-orange-950/30">
+              <GraduationCap size={24} strokeWidth={2.3} />
+            </div>
+
+            <div>
+              <h1 className="text-[21px] font-black leading-none tracking-tight text-white">
+                Test<span className="text-[#FFAD70]">Pilot</span>
+              </h1>
+              <p className="mt-1.5 text-[9px] font-bold uppercase tracking-[0.19em] text-blue-200/60">
+                Learning platform
+              </p>
+            </div>
           </div>
 
           <button
             type="button"
-            onClick={() => setMobileOpen(false)}
-            className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 lg:hidden"
+            onClick={closeMobileMenu}
+            className="rounded-lg p-2 text-blue-100 hover:bg-white/10 lg:hidden"
             aria-label="Close navigation"
           >
-            <X size={20} />
+            <X size={19} />
           </button>
         </div>
 
-        {/* Student information */}
-        <div className="border-b border-slate-100 px-5 py-5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            Student Workspace
-          </p>
+        {/* Student profile */}
+        <div className="mx-4 mt-5 shrink-0 rounded-xl border border-white/[0.09] bg-white/[0.055] p-3.5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FF7417] text-sm font-extrabold text-white shadow-md shadow-orange-950/20">
+              {initials || "S"}
+            </div>
 
-          <p className="mt-2 truncate font-semibold text-slate-800">
-            {user?.name
-  ? user.name.charAt(0).toUpperCase() + user.name.slice(1)
-  : "Student"}
-          </p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[13px] font-bold text-white">
+                {studentName}
+              </p>
+              <p className="mt-1 truncate text-[11px] text-blue-100/60">
+                {user?.email || "Student account"}
+              </p>
+            </div>
 
-          <p className="mt-1 truncate text-xs text-slate-500">
-            {/* {user?.email || ""} */}
-          </p>
+            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400 ring-4 ring-emerald-400/10" />
+          </div>
+
+
         </div>
 
         {/* Navigation */}
-        <nav className="space-y-2 p-4">
-          {navigation.map(({ label, path, icon: Icon }) => (
-            <NavLink
-              key={path}
-              to={path}
-              onClick={() => setMobileOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold transition ${
-                  isActive
-                    ? "bg-indigo-50 text-indigo-700"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                }`
-              }
-            >
-              <Icon size={19} />
-              <span>{label}</span>
-            </NavLink>
-          ))}
+        <nav className="mt-7 flex-1 px-4">
+          <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.17em] text-blue-200/40">
+            Main menu
+          </p>
+
+          <div className="space-y-4">
+            {navigation.map(({ label, path, icon: Icon }) => (
+              <NavLink
+                key={path}
+                to={path}
+                end
+                onClick={closeMobileMenu}
+                className={({ isActive }) =>
+                  `group flex items-center gap-3 rounded-xl px-3.5 py-3 transition-all duration-200 ${
+                    isActive
+                      ? "bg-[#FF7417] text-white shadow-lg shadow-orange-950/20"
+                      : "text-blue-100/65 hover:bg-white/[0.07] hover:text-white"
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <Icon
+                      size={19}
+                      strokeWidth={isActive ? 2.4 : 1.9}
+                      className={
+                        isActive
+                          ? "text-white"
+                          : "text-blue-200/60 group-hover:text-[#FFAD70]"
+                      }
+                    />
+
+                    <span className="flex-1 text-[13px] font-semibold">
+                      {label}
+                    </span>
+
+                    {isActive && (
+                      <ChevronRight size={16} strokeWidth={2.5} />
+                    )}
+                  </>
+                )}
+              </NavLink>
+            ))}
+          </div>
         </nav>
 
+
         {/* Logout */}
-        <div className="absolute inset-x-0 bottom-0 border-t border-slate-100 p-4">
+        <div className="shrink-0 border-t border-white/[0.09] p-4">
           <button
             type="button"
             onClick={() => setShowLogoutConfirm(true)}
-            className="flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+            className="flex w-full items-center gap-3 rounded-xl px-3.5 py-3 text-[13px] font-semibold text-blue-100/65 transition hover:bg-red-500/10 hover:text-red-300"
           >
             <LogOut size={19} />
-            Logout
+            Sign out
           </button>
         </div>
       </aside>
 
-      {/* Main content */}
-      <div className="min-h-screen lg:pl-64">
+      {/* Main area */}
+      <div className="min-h-screen lg:pl-[260px]">
+
         {/* Topbar */}
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 backdrop-blur sm:px-7">
+        <header className="sticky top-0 z-30 flex h-[72px] items-center justify-between border-b border-slate-200/80 bg-white/95 px-4 backdrop-blur-xl sm:px-7 lg:px-9">
           <div className="flex items-center gap-3">
             <button
               type="button"
               onClick={() => setMobileOpen(true)}
-              className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden"
+              className="rounded-lg border border-slate-200 p-2.5 text-[#19284F] transition hover:border-orange-200 hover:bg-orange-50 lg:hidden"
               aria-label="Open navigation"
             >
-              <Menu size={21} />
+              <Menu size={20} />
             </button>
 
             <div>
-              <p className="text-xs text-slate-400">
-                Student Workspace
-              </p>
-              <h2 className="font-bold text-slate-900">
+              <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                <span>Student portal</span>
+                <ChevronRight size={12} />
+                <span className="font-semibold text-[#F97316]">
+                  {activePage}
+                </span>
+              </div>
+
+              <h2 className="mt-1 text-[15px] font-bold text-[#19284F]">
                 {activePage}
               </h2>
             </div>
@@ -169,25 +305,45 @@ export default function StudentLayout({ user, onLogout }) {
 
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
-              <p className="text-sm font-semibold text-slate-800">
-                {user?.name || "Student"}
+              <p className="text-[13px] font-bold text-[#19284F]">
+                {studentName}
               </p>
-              <p className="text-xs text-slate-500">Student</p>
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                Student account
+              </p>
             </div>
 
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">
-              {(user?.name || "S").charAt(0).toUpperCase()}
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-orange-100 bg-orange-50 text-sm font-extrabold text-orange-600">
+              {initials || "S"}
             </div>
           </div>
         </header>
 
         {/* Page content */}
-        <main className="p-4 sm:p-7 lg:p-9">
+        <main className="mx-auto min-h-[calc(100vh-72px)] w-full max-w-[1600px] px-4 py-6 sm:px-7 sm:py-8 lg:px-9">
+
+          {startError && (
+            <div className="mb-5 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              <span>{startError}</span>
+              <button
+                type="button"
+                onClick={() => setStartError("")}
+                className="font-bold hover:underline"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {startingTest && (
+            <div className="mb-5 flex items-center gap-3 rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm font-semibold text-orange-700">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-[#FF7417]" />
+              Preparing your assessment...
+            </div>
+          )}
+
           <Routes>
-            <Route
-              index
-              element={<Navigate to="dashboard" replace />}
-            />
+            <Route index element={<Navigate to="dashboard" replace />} />
 
             <Route
               path="dashboard"
@@ -195,6 +351,8 @@ export default function StudentLayout({ user, onLogout }) {
                 <StudentDashboard
                   mode="dashboard"
                   user={user}
+                  onStartTest={handleStartTest}
+                  onNavigate={handleNavigate}
                 />
               }
             />
@@ -205,6 +363,8 @@ export default function StudentLayout({ user, onLogout }) {
                 <StudentDashboard
                   mode="assessments"
                   user={user}
+                  onStartTest={handleStartTest}
+                  onNavigate={handleNavigate}
                 />
               }
             />
@@ -220,6 +380,7 @@ export default function StudentLayout({ user, onLogout }) {
                 <StudentDashboard
                   mode="results"
                   user={user}
+                  onNavigate={handleNavigate}
                 />
               }
             />
@@ -231,15 +392,15 @@ export default function StudentLayout({ user, onLogout }) {
           </Routes>
         </main>
 
-        <footer className="px-5 pb-6 text-center text-xs text-slate-400">
-          TestPilot · Technical Assessment Platform
+        <footer className="border-t border-slate-200/70 bg-white px-5 py-5 text-center text-[11px] font-medium text-slate-400">
+          © {new Date().getFullYear()} TestPilot · Technical Assessment Platform
         </footer>
       </div>
 
       {/* Logout confirmation */}
       {showLogoutConfirm && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-[#101B3C]/60 p-4 backdrop-blur-sm"
           onClick={(event) => {
             if (event.target === event.currentTarget) {
               setShowLogoutConfirm(false);
@@ -250,36 +411,29 @@ export default function StudentLayout({ user, onLogout }) {
             role="dialog"
             aria-modal="true"
             aria-labelledby="student-logout-title"
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+            className="w-full max-w-md rounded-2xl border border-slate-100 bg-white p-7 shadow-2xl"
           >
-            <div className="flex items-center justify-between">
-              <h2
-                id="student-logout-title"
-                className="text-xl font-bold text-slate-900"
-              >
-                Logout from TestPilot?
-              </h2>
-
-              <button
-                type="button"
-                onClick={() => setShowLogoutConfirm(false)}
-                className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"
-                aria-label="Close confirmation"
-              >
-                <X size={20} />
-              </button>
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-50 text-red-600">
+              <LogOut size={22} />
             </div>
 
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              Are you sure you want to log out? You will need to sign in
-              again to access your assessments and results.
+            <h2
+              id="student-logout-title"
+              className="mt-5 text-xl font-extrabold text-[#19284F]"
+            >
+              Sign out of TestPilot?
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-slate-500">
+              Are you sure you want to log out? You will need to sign in again
+              to access your assessments and results.
             </p>
 
-            <div className="mt-6 flex gap-3">
+            <div className="mt-7 flex gap-3">
               <button
                 type="button"
                 onClick={() => setShowLogoutConfirm(false)}
-                className="flex-1 rounded-xl border border-slate-200 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+                className="flex-1 rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
               >
                 Cancel
               </button>
@@ -287,10 +441,10 @@ export default function StudentLayout({ user, onLogout }) {
               <button
                 type="button"
                 onClick={onLogout}
-                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 font-semibold text-white hover:bg-red-700"
+                className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-700"
               >
-                <LogOut size={17} />
-                Yes, Logout
+                <LogOut size={16} />
+                Sign out
               </button>
             </div>
           </div>
@@ -300,26 +454,25 @@ export default function StudentLayout({ user, onLogout }) {
   );
 }
 
-/* Temporary page until the student Question Bank is implemented */
 function StudentQuestionBankPlaceholder() {
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm sm:p-12">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-        <Library size={30} />
+    <section className="flex min-h-[60vh] flex-col items-center justify-center rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
+      <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-orange-50 text-orange-600">
+        <Library size={34} />
       </div>
 
-      <h1 className="mt-5 text-2xl font-bold text-slate-900">
+      <span className="mt-6 rounded-full bg-orange-50 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-orange-700">
+        Coming soon
+      </span>
+
+      <h1 className="mt-4 text-2xl font-extrabold tracking-tight text-[#19284F]">
         Student Question Bank
       </h1>
 
-      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
-        Your practice question library will appear here. You will be able
-        to explore questions by subject, topic, and difficulty.
+      <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-slate-500">
+        Your practice library will appear here. Explore questions by subject,
+        topic, and difficulty to strengthen your concepts.
       </p>
-
-      <span className="mt-5 inline-flex rounded-full bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700">
-        Question Bank setup pending
-      </span>
     </section>
   );
 }

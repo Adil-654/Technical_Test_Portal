@@ -93,9 +93,9 @@ export async function getAvailableTests(req, res, next) {
     const tests = await Test.find({
       status: "published",
     })
-      .select(
-        "title name description subject durationMinutes totalMarks startAt endAt attemptsAllowed questions status createdAt"
-      )
+     .select(
+  "title name description subject durationMinutes totalMarks startAt endAt attemptsAllowed questionIds status createdAt"
+)
       .populate("subject", "name code")
       .sort({ createdAt: -1 })
       .lean();
@@ -171,12 +171,12 @@ export async function getAvailableTests(req, res, next) {
         subject: test.subject || null,
         durationMinutes: Number(test.durationMinutes) || 0,
         totalMarks: Number(test.totalMarks) || 0,
-        questionCount: Array.isArray(test.questions)
-          ? test.questions.length
-          : 0,
-        questions: Array.isArray(test.questions)
-          ? test.questions
-          : [],
+        questionCount: Array.isArray(test.questionIds)
+  ? test.questionIds.length
+  : 0,
+questions: Array.isArray(test.questionIds)
+  ? test.questionIds
+  : [],
         startAt: test.startAt || null,
         endAt: test.endAt || null,
         attemptsAllowed,
@@ -217,9 +217,9 @@ export async function startTestAttempt(req, res, next) {
       _id: testId,
       status: "published",
     })
-      .select(
-        "title subject questions durationMinutes totalMarks startAt endAt attemptsAllowed"
-      )
+     .select(
+  "title subject questionIds durationMinutes totalMarks startAt endAt attemptsAllowed"
+)
       .populate("subject", "name code");
 
     if (!test) {
@@ -285,17 +285,21 @@ export async function startTestAttempt(req, res, next) {
       );
     }
 
-    const questionIds = Array.isArray(test.questions)
-      ? test.questions
-      : [];
+  const questionIds = Array.isArray(test.questionIds)
+  ? test.questionIds
+  : [];
 
-    if (questionIds.length === 0) {
-      return sendError(
-        res,
-        409,
-        "This assessment has no questions."
-      );
-    }
+if (questionIds.length === 0) {
+  return sendError(
+    res,
+    409,
+    "This assessment has no questions."
+  );
+}
+console.log("TEST ID:", test._id);
+console.log("QUESTION IDS:", questionIds);
+console.log("QUESTION COUNT:", questionIds.length);
+console.log("POPULATED SUBJECT:", test.subject?._id);
 
     const questions = await Question.find({
       _id: { $in: questionIds },

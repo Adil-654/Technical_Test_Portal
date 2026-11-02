@@ -15,14 +15,20 @@ import {
   ArrowRight,
   AlertCircle,
   Library,
+  Trophy,
+  Zap,
 } from "lucide-react";
 import api from "../services/api";
 
+const theme = {
+  navy: "#172554",
+  orange: "#F97316",
+  lightOrange: "#FDBA74",
+};
+
 function formatDate(value) {
   if (!value) return "Not scheduled";
-
   const date = new Date(value);
-
   if (Number.isNaN(date.getTime())) return "Not available";
 
   return date.toLocaleString("en-IN", {
@@ -32,16 +38,20 @@ function formatDate(value) {
 }
 
 function getScheduleStatus(test, now = Date.now()) {
-  const startAt = test.startAt ? new Date(test.startAt).getTime() : NaN;
-  const endAt = test.endAt ? new Date(test.endAt).getTime() : NaN;
+  const startAt = test.startAt ? new Date(test.startAt).getTime() : null;
+  const endAt = test.endAt ? new Date(test.endAt).getTime() : null;
 
-  if (!Number.isFinite(startAt) || !Number.isFinite(endAt)) {
-    return "Schedule missing";
+  if (
+    (startAt !== null && !Number.isFinite(startAt)) ||
+    (endAt !== null && !Number.isFinite(endAt))
+  ) {
+    return "Schedule unavailable";
   }
 
-  if (now < startAt) return "Upcoming";
-  if (now > endAt) return "Closed";
+  if (startAt !== null && now < startAt) return "Upcoming";
+  if (endAt !== null && now > endAt) return "Closed";
   if (test.inProgressAttemptId) return "In progress";
+
   if (
     test.attemptsRemaining != null &&
     Number(test.attemptsRemaining) <= 0
@@ -53,19 +63,21 @@ function getScheduleStatus(test, now = Date.now()) {
 }
 
 function canStartTest(test, now = Date.now()) {
-  const startAt = test.startAt ? new Date(test.startAt).getTime() : NaN;
-  const endAt = test.endAt ? new Date(test.endAt).getTime() : NaN;
+  const startAt = test.startAt ? new Date(test.startAt).getTime() : null;
+  const endAt = test.endAt ? new Date(test.endAt).getTime() : null;
+
+  const validSchedule =
+    (startAt === null || Number.isFinite(startAt)) &&
+    (endAt === null || Number.isFinite(endAt));
 
   const withinSchedule =
-    Number.isFinite(startAt) &&
-    Number.isFinite(endAt) &&
-    now >= startAt &&
-    now <= endAt;
+    validSchedule &&
+    (startAt === null || now >= startAt) &&
+    (endAt === null || now <= endAt);
 
   const hasAttempts =
     Boolean(test.inProgressAttemptId) ||
-    test.attemptsRemaining == null ||
-    Number(test.attemptsRemaining) > 0;
+    Number(test.attemptsRemaining ?? 1) > 0;
 
   return withinSchedule && hasAttempts;
 }
@@ -84,23 +96,42 @@ function getErrorMessage(error, fallback) {
   const status = error?.response?.status;
   const message = error?.response?.data?.message;
 
-  if (status === 401) {
-    return "Your session may have expired. Please log in again.";
-  }
-
-  if (status === 403) {
-    return "You do not have permission to access this information.";
-  }
-
-  if (status === 404) {
-    return "The requested API route was not found. Check the backend route configuration.";
-  }
-
-  if (status >= 500) {
-    return message || "The server encountered an error. Check the backend terminal.";
-  }
+  if (status === 401) return "Your session may have expired. Please log in again.";
+  if (status === 403) return "You do not have permission to access this information.";
+  if (status === 404) return "The requested API route was not found. Check the backend route configuration.";
+  if (status >= 500) return message || "The server encountered an error. Check the backend terminal.";
 
   return message || error?.message || fallback;
+}
+
+function getPercentage(result) {
+  if (result.percentage != null) {
+    const value = Number(result.percentage);
+    return Number.isFinite(value) ? value : null;
+  }
+
+  const score = Number(
+    result.score ?? result.marksObtained ?? result.obtainedMarks
+  );
+
+  const total = Number(
+    result.totalMarks ?? result.maxMarks ?? result.test?.totalMarks
+  );
+
+  return Number.isFinite(score) && Number.isFinite(total) && total > 0
+    ? (score / total) * 100
+    : null;
+}
+
+function getCompletedResults(results) {
+  return results.filter((result) => {
+    const status = String(result.status || "").toLowerCase();
+
+    return (
+      ["submitted", "expired", "completed"].includes(status) ||
+      Boolean(result.submittedAt || result.completedAt)
+    );
+  });
 }
 
 export default function StudentDashboard({
@@ -163,9 +194,7 @@ export default function StudentDashboard({
         );
       }
     } catch (err) {
-      setError(
-        getErrorMessage(err, "Unable to load dashboard data.")
-      );
+      setError(getErrorMessage(err, "Unable to load dashboard data."));
     } finally {
       setLoading(false);
     }
@@ -176,10 +205,7 @@ export default function StudentDashboard({
   }, [loadData]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 15000);
-
+    const interval = setInterval(() => setCurrentTime(Date.now()), 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -194,68 +220,42 @@ export default function StudentDashboard({
         .filter((test) => getScheduleStatus(test, currentTime) === "Upcoming")
         .sort(
           (a, b) =>
-            new Date(a.startAt).getTime() -
-            new Date(b.startAt).getTime()
+            new Date(a.startAt).getTime() - new Date(b.startAt).getTime()
         ),
     [tests, currentTime]
   );
 
   const completedResults = useMemo(
-    () =>
-      results.filter((result) => {
-        const status = String(result.status || "").toLowerCase();
-
-        return (
-          ["submitted", "expired", "completed"].includes(status) ||
-          Boolean(result.submittedAt || result.completedAt)
-        );
-      }),
+    () => getCompletedResults(results),
     [results]
   );
 
-  const averageScore = useMemo(() => {
-    const percentages = completedResults
-      .map((result) => {
-        if (result.percentage != null) {
-          const value = Number(result.percentage);
-          return Number.isFinite(value) ? value : null;
-        }
+  const percentages = useMemo(
+    () =>
+      completedResults
+        .map(getPercentage)
+        .filter((value) => value !== null),
+    [completedResults]
+  );
 
-        const score = Number(
-          result.score ??
-          result.marksObtained ??
-          result.obtainedMarks
-        );
-
-        const total = Number(
-          result.totalMarks ??
-          result.maxMarks ??
-          result.test?.totalMarks
-        );
-
-        return Number.isFinite(score) &&
-          Number.isFinite(total) &&
-          total > 0
-          ? (score / total) * 100
-          : null;
-      })
-      .filter((value) => value !== null);
-
-    return percentages.length
-      ? Math.round(
+  const averageScore = percentages.length
+    ? Math.round(
         percentages.reduce((sum, value) => sum + value, 0) /
-        percentages.length
+          percentages.length
       )
-      : null;
-  }, [completedResults]);
+    : null;
+
+  const bestScore = percentages.length
+    ? Math.round(Math.max(...percentages))
+    : null;
 
   if (mode === "results") {
     return (
-      <div className="space-y-6">
+      <div className="space-y-7">
         <PageHeader
           eyebrow="YOUR PERFORMANCE"
           title="My Results"
-          description="Review your completed assessments, scores, and performance."
+          description="Review your completed assessments, scores and achievements."
           onRefresh={loadData}
           loading={loading}
         />
@@ -284,7 +284,7 @@ export default function StudentDashboard({
           />
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-3">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               <MiniStat
                 icon={FileCheck2}
                 label="Completed tests"
@@ -296,85 +296,49 @@ export default function StudentDashboard({
                 value={averageScore === null ? "—" : `${averageScore}%`}
               />
               <MiniStat
-                icon={Award}
+                icon={Trophy}
                 label="Best score"
-                value={`${Math.max(
-                  ...completedResults.map((result) => {
-                    if (result.percentage != null) {
-                      return Number(result.percentage) || 0;
-                    }
-
-                    const score = Number(
-                      result.score ??
-                      result.marksObtained ??
-                      result.obtainedMarks
-                    );
-                    const total = Number(
-                      result.totalMarks ??
-                      result.maxMarks ??
-                      result.test?.totalMarks
-                    );
-
-                    return total > 0 && Number.isFinite(score)
-                      ? (score / total) * 100
-                      : 0;
-                  })
-                ).toFixed(0)}%`}
+                value={bestScore === null ? "—" : `${bestScore}%`}
               />
             </div>
 
             <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
               <div className="border-b border-slate-100 p-5 sm:p-6">
-                <h2 className="text-lg font-bold text-slate-900">
-                  Assessment history
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Your completed and submitted attempts.
-                </p>
+                <SectionHeading
+                  icon={Award}
+                  title="Assessment history"
+                  description="Your completed and submitted attempts."
+                />
               </div>
 
               <div className="divide-y divide-slate-100">
                 {[...completedResults]
-                  .sort((a, b) => {
-                    const dateA = new Date(
-                      a.submittedAt || a.completedAt || 0
-                    ).getTime();
-                    const dateB = new Date(
-                      b.submittedAt || b.completedAt || 0
-                    ).getTime();
-
-                    return dateB - dateA;
-                  })
+                  .sort(
+                    (a, b) =>
+                      new Date(b.submittedAt || b.completedAt || 0).getTime() -
+                      new Date(a.submittedAt || a.completedAt || 0).getTime()
+                  )
                   .map((result, index) => {
                     const score = Number(
                       result.score ??
-                      result.marksObtained ??
-                      result.obtainedMarks
+                        result.marksObtained ??
+                        result.obtainedMarks
                     );
                     const total = Number(
                       result.totalMarks ??
-                      result.maxMarks ??
-                      result.test?.totalMarks
+                        result.maxMarks ??
+                        result.test?.totalMarks
                     );
-
-                    const percentage =
-                      result.percentage != null
-                        ? Number(result.percentage)
-                        : total > 0 && Number.isFinite(score)
-                          ? (score / total) * 100
-                          : null;
-
-                    const status = String(
-                      result.status || "Submitted"
-                    );
+                    const percentage = getPercentage(result);
+                    const status = String(result.status || "Submitted");
 
                     return (
                       <div
                         key={result._id || result.id || index}
                         className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
                       >
-                        <div className="flex min-w-0 items-start gap-3">
-                          <div className="rounded-xl bg-indigo-50 p-3 text-indigo-700">
+                        <div className="flex min-w-0 items-start gap-4">
+                          <div className="rounded-xl bg-orange-50 p-3 text-orange-600">
                             <FileCheck2 size={22} />
                           </div>
 
@@ -385,37 +349,33 @@ export default function StudentDashboard({
                                 result.testTitle ||
                                 "Assessment"}
                             </h3>
-
                             <p className="mt-1 text-sm text-slate-500">
                               {result.test?.subject?.name ||
                                 result.subject?.name ||
                                 "Assessment result"}
                             </p>
-
                             <p className="mt-2 text-xs text-slate-400">
                               Submitted:{" "}
                               {formatDate(
-                                result.submittedAt ||
-                                result.completedAt
+                                result.submittedAt || result.completedAt
                               )}
                             </p>
-
-                            <span className="mt-2 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium capitalize text-slate-600">
+                            <span className="mt-2 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-600">
                               {status}
                             </span>
                           </div>
                         </div>
 
-                        <div className="shrink-0 rounded-xl bg-emerald-50 px-5 py-3 sm:text-right">
-                          <p className="text-2xl font-bold text-emerald-700">
+                        <div className="rounded-xl bg-orange-50 px-5 py-3 sm:text-right">
+                          <p className="text-2xl font-extrabold text-orange-600">
                             {percentage === null
                               ? "—"
                               : `${Math.round(percentage)}%`}
                           </p>
-
-                          <p className="mt-1 text-sm text-emerald-700">
-                            {Number.isFinite(score) && Number.isFinite(total) &&
-                              total > 0
+                          <p className="mt-1 text-sm text-slate-600">
+                            {Number.isFinite(score) &&
+                            Number.isFinite(total) &&
+                            total > 0
                               ? `${score} / ${total} marks`
                               : "Score"}
                           </p>
@@ -431,10 +391,9 @@ export default function StudentDashboard({
     );
   }
 
-
   if (mode === "assessments") {
     return (
-      <div className="space-y-6">
+      <div className="space-y-7">
         <PageHeader
           eyebrow="YOUR LEARNING SPACE"
           title="My Assessments"
@@ -446,9 +405,8 @@ export default function StudentDashboard({
         {error && <ErrorMessage message={error} onRetry={loadData} />}
 
         {resultsError && (
-          <p className="text-sm text-amber-700">
-            Your assessments loaded, but results could not be loaded:{" "}
-            {resultsError}
+          <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Your assessments loaded, but results could not be loaded: {resultsError}
           </p>
         )}
 
@@ -473,31 +431,20 @@ export default function StudentDashboard({
         ) : (
           <>
             <div className="grid gap-4 sm:grid-cols-3">
-              <MiniStat
-                icon={BookOpen}
-                label="All assessments"
-                value={tests.length}
-              />
-              <MiniStat
-                icon={Play}
-                label="Ready to start"
-                value={availableTests.length}
-              />
-              <MiniStat
-                icon={CalendarDays}
-                label="Upcoming"
-                value={upcomingTests.length}
-              />
+              <MiniStat icon={BookOpen} label="All assessments" value={tests.length} />
+              <MiniStat icon={Play} label="Ready to start" value={availableTests.length} />
+              <MiniStat icon={CalendarDays} label="Upcoming" value={upcomingTests.length} />
             </div>
 
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">              {tests.map((test, index) => (
-              <AssessmentCard
-                key={test._id || test.id || index}
-                test={test}
-                now={currentTime}
-                onStart={() => onStartTest?.(test)}
-              />
-            ))}
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+              {tests.map((test, index) => (
+                <AssessmentCard
+                  key={test._id || test.id || index}
+                  test={test}
+                  now={currentTime}
+                  onStart={() => onStartTest?.(test)}
+                />
+              ))}
             </div>
           </>
         )}
@@ -507,29 +454,31 @@ export default function StudentDashboard({
 
   return (
     <div className="space-y-7">
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-950 via-indigo-950 to-violet-800 p-7 text-white shadow-xl sm:p-10">
-        <div className="pointer-events-none absolute -right-10 -top-16 h-64 w-64 rounded-full bg-violet-400/20 blur-3xl" />
+      {/* Welcome banner */}
+      <section className="relative isolate overflow-hidden rounded-3xl bg-gradient-to-br from-[#172554] via-[#1E3A70] to-[#F97316] p-7 text-white shadow-xl sm:p-9">
+        <div className="pointer-events-none absolute -right-16 -top-20 h-72 w-72 rounded-full bg-orange-300/20 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 right-1/4 h-64 w-64 rounded-full bg-blue-400/20 blur-3xl" />
 
-        <div className="relative flex flex-col justify-between gap-7 md:flex-row md:items-center">
+        <div className="relative flex flex-col justify-between gap-8 md:flex-row md:items-center">
           <div className="max-w-2xl">
-            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-sm text-indigo-100">
-              <ShieldCheck size={16} />
-              TestPilot Student Portal
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-semibold tracking-wide text-orange-100">
+              <ShieldCheck size={15} />
+              TESTPILOT STUDENT PORTAL
             </div>
 
-            <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
+            <h1 className="text-3xl font-extrabold tracking-tight sm:text-4xl">
               Welcome{user?.name ? `, ${user.name}` : " back"}!
             </h1>
 
-            <p className="mt-3 max-w-xl text-sm leading-6 text-indigo-100 sm:text-base">
-              Your next challenge is waiting. Explore assessments,
-              monitor your results, and keep improving.
+            <p className="mt-3 max-w-xl text-sm leading-6 text-blue-100 sm:text-base">
+              Every test is a new opportunity to improve. Challenge yourself,
+              track your performance and keep moving forward.
             </p>
 
             <button
               type="button"
               onClick={() => onNavigate?.("tests")}
-              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-indigo-800 transition hover:bg-indigo-50"
+              className="mt-7 inline-flex items-center gap-2 rounded-xl bg-[#F97316] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-orange-950/20 transition hover:-translate-y-0.5 hover:bg-orange-500"
             >
               <Play size={17} />
               Explore assessments
@@ -537,100 +486,92 @@ export default function StudentDashboard({
             </button>
           </div>
 
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center self-start rounded-3xl border border-white/20 bg-white/10 md:self-center">
-            <Target size={44} />
+          <div className="flex h-28 w-28 shrink-0 items-center justify-center self-start rounded-3xl border border-white/20 bg-white/10 shadow-inner backdrop-blur md:mr-5 md:self-center">
+            <Target size={54} className="text-orange-300" />
           </div>
+        </div>
+
+        <div className="relative mt-8 flex flex-wrap gap-5 border-t border-white/15 pt-5 text-sm text-blue-100">
+          <span className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-orange-300" />
+            Learn consistently
+          </span>
+          <span className="flex items-center gap-2">
+            <TrendingUp size={16} className="text-orange-300" />
+            Track your growth
+          </span>
+          <span className="flex items-center gap-2">
+            <Trophy size={16} className="text-orange-300" />
+            Aim higher
+          </span>
         </div>
       </section>
 
       {error && <ErrorMessage message={error} onRetry={loadData} />}
 
+      {/* Statistics */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={BookOpen}
           label="My assessments"
           value={loading ? "—" : tests.length}
           detail="Published tests"
-          color="indigo"
+          accent="navy"
         />
         <StatCard
-          icon={Play}
+          icon={Zap}
           label="Ready to attempt"
           value={loading ? "—" : availableTests.length}
-          detail="Within the scheduled time"
-          color="emerald"
+          detail="Available right now"
+          accent="orange"
         />
         <StatCard
           icon={CheckCircle2}
           label="Completed tests"
           value={loading ? "—" : completedResults.length}
           detail="Submitted or expired"
-          color="violet"
+          accent="green"
         />
         <StatCard
           icon={TrendingUp}
           label="Average score"
-          value={
-            loading
-              ? "—"
-              : averageScore === null
-                ? "—"
-                : `${averageScore}%`
-          }
+          value={loading ? "—" : averageScore === null ? "—" : `${averageScore}%`}
           detail="Across scored attempts"
-          color="amber"
+          accent="purple"
         />
       </section>
 
+      {/* Main dashboard content */}
       <section className="grid gap-6 xl:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                {availableTests.length > 0
-                  ? "Ready when you are"
-                  : "Your upcoming assessments"}
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Your tests and their current schedules.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => onNavigate?.("tests")}
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-indigo-700 hover:text-indigo-900"
-            >
+            <SectionHeading
+              icon={CalendarDays}
+              title={availableTests.length > 0 ? "Ready when you are" : "Your assessments"}
+              description="Your tests and their current schedules."
+            />
+            <TextButton onClick={() => onNavigate?.("tests")}>
               View all <ArrowRight size={16} />
-            </button>
+            </TextButton>
           </div>
 
           {loading ? (
             <LoadingCards />
           ) : tests.length === 0 ? (
-            <div className="py-12 text-center">
-              <BookOpen size={36} className="mx-auto text-slate-300" />
-              <p className="mt-3 font-semibold text-slate-700">
-                No assessments available
-              </p>
-              <p className="mt-1 text-sm text-slate-500">
-                Your administrator's published tests will appear here.
-              </p>
-            </div>
+            <EmptyInline
+              icon={BookOpen}
+              title="No assessments available"
+              description="Your administrator's published tests will appear here."
+            />
           ) : (
             <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
               {[...tests]
                 .sort((a, b) => {
-                  const aStart = a.startAt
-                    ? new Date(a.startAt).getTime()
-                    : Infinity;
-                  const bStart = b.startAt
-                    ? new Date(b.startAt).getTime()
-                    : Infinity;
-
+                  const aStart = a.startAt ? new Date(a.startAt).getTime() : Infinity;
+                  const bStart = b.startAt ? new Date(b.startAt).getTime() : Infinity;
                   return aStart - bStart;
                 })
-                .slice(0, 5)
+                .slice(0, 4)
                 .map((test, index) => {
                   const status = getScheduleStatus(test, currentTime);
                   const available = canStartTest(test, currentTime);
@@ -638,36 +579,40 @@ export default function StudentDashboard({
                   return (
                     <div
                       key={test._id || test.id || index}
-                      className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 transition hover:border-indigo-200 hover:shadow-sm"                    >
+                      className="flex flex-col justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 transition hover:border-orange-300 hover:bg-orange-50/30 hover:shadow-sm"
+                    >
                       <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
-                          {test.subject?.code ||
-                            test.subject?.name ||
-                            "ASSESSMENT"}
+                        <p className="text-xs font-bold uppercase tracking-wider text-orange-600">
+                          {test.subject?.code || test.subject?.name || "ASSESSMENT"}
                         </p>
-                        <h3 className="mt-1 font-bold text-slate-900">
+                        <h3 className="mt-2 font-bold text-[#172554]">
                           {test.title || test.name || "Untitled assessment"}
                         </h3>
-                        <p className="mt-1 text-sm text-slate-500">
-                          {test.durationMinutes ?? "—"} minutes
-                          {" · "}
-                          {test.totalMarks ?? "—"} marks
-                        </p>
-                        <p className="mt-1 text-xs text-slate-400">
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock3 size={13} />
+                            {test.durationMinutes ?? "—"} min
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Target size={13} />
+                            {test.totalMarks ?? "—"} marks
+                          </span>
+                        </div>
+                        <p className="mt-3 text-xs text-slate-400">
                           {formatDate(test.startAt)}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <StatusBadge status={status} />
                         {available && (
                           <button
                             type="button"
                             onClick={() => onStartTest?.(test)}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#F97316] px-3 py-2 text-sm font-bold text-white transition hover:bg-orange-600"
                           >
                             <Play size={14} />
-                            Start
+                            {status === "In progress" ? "Resume" : "Start"}
                           </button>
                         )}
                       </div>
@@ -678,29 +623,31 @@ export default function StudentDashboard({
           )}
         </div>
 
+        {/* Progress panel */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-indigo-50 p-3 text-indigo-700">
-              <Award size={22} />
-            </div>
-            <div>
-              <h2 className="font-bold text-slate-900">My progress</h2>
-              <p className="text-sm text-slate-500">
-                Keep moving forward
-              </p>
-            </div>
-          </div>
+          <SectionHeading
+            icon={Award}
+            title="My progress"
+            description="Keep moving forward."
+          />
 
-          <div className="mt-5 rounded-xl bg-indigo-50 p-4">
-            <p className="text-sm font-medium text-indigo-700">
-              Average score
-            </p>
-            <p className="mt-1 text-3xl font-bold text-indigo-950">
+          <div className="mt-6 rounded-2xl bg-gradient-to-br from-[#172554] to-[#263F78] p-5 text-white">
+            <p className="text-sm font-medium text-blue-100">Average score</p>
+            <p className="mt-2 text-4xl font-extrabold">
               {averageScore === null ? "—" : `${averageScore}%`}
             </p>
-            <p className="mt-1 text-xs text-indigo-600">
+            <p className="mt-1 text-xs text-blue-200">
               {completedResults.length} completed attempt(s)
             </p>
+
+            {averageScore !== null && (
+              <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/20">
+                <div
+                  className="h-full rounded-full bg-[#F97316] transition-all"
+                  style={{ width: `${Math.min(100, Math.max(0, averageScore))}%` }}
+                />
+              </div>
+            )}
           </div>
 
           {resultsError && (
@@ -709,100 +656,94 @@ export default function StudentDashboard({
             </p>
           )}
 
-          <div className="mt-5 space-y-3">
-  <QuickAction
-    icon={BookOpen}
-    title="Browse assessments"
-    description="Find your next test"
-    onClick={() => onNavigate?.("tests")}
-  />
-
-  <QuickAction
-    icon={Library}
-    title="Question Bank"
-    description="Practice and explore questions"
-    onClick={() => onNavigate?.("question-bank")}
-  />
-
-  <QuickAction
-    icon={Award}
-    title="My results"
-    description="Review your performance"
-    onClick={() => onNavigate?.("results")}
-  />
-
-  <QuickAction
-    icon={Clock3}
-    title="Upcoming tests"
-    description={`${upcomingTests.length} scheduled`}
-    onClick={() => onNavigate?.("tests")}
-  />
-</div>
+          <div className="mt-5 space-y-2">
+            <QuickAction
+              icon={BookOpen}
+              title="Browse assessments"
+              description="Find your next test"
+              onClick={() => onNavigate?.("tests")}
+            />
+            <QuickAction
+              icon={Library}
+              title="Question Bank"
+              description="Practice and explore questions"
+              onClick={() => onNavigate?.("question-bank")}
+            />
+            <QuickAction
+              icon={Award}
+              title="My results"
+              description="Review your performance"
+              onClick={() => onNavigate?.("results")}
+            />
+            <QuickAction
+              icon={Clock3}
+              title="Upcoming tests"
+              description={`${upcomingTests.length} scheduled`}
+              onClick={() => onNavigate?.("tests")}
+            />
+          </div>
         </div>
       </section>
 
+      {/* Recent activity */}
       {!loading && completedResults.length > 0 && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">
-                Recent activity
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Your latest completed attempts.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigate?.("results")}
-              className="text-sm font-semibold text-indigo-700 hover:text-indigo-900"
-            >
-              All results
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <SectionHeading
+              icon={FileCheck2}
+              title="Recent activity"
+              description="Your latest completed attempts."
+            />
+            <TextButton onClick={() => onNavigate?.("results")}>
+              All results <ArrowRight size={16} />
+            </TextButton>
           </div>
 
           <div className="mt-4 divide-y divide-slate-100">
             {[...completedResults]
-              .sort((a, b) => {
-                const dateA = new Date(
-                  a.submittedAt || a.completedAt || 0
-                ).getTime();
-                const dateB = new Date(
-                  b.submittedAt || b.completedAt || 0
-                ).getTime();
-
-                return dateB - dateA;
-              })
+              .sort(
+                (a, b) =>
+                  new Date(b.submittedAt || b.completedAt || 0).getTime() -
+                  new Date(a.submittedAt || a.completedAt || 0).getTime()
+              )
               .slice(0, 3)
-              .map((result, index) => (
-                <div
-                  key={result._id || result.id || index}
-                  className="flex items-center justify-between gap-4 py-4"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-slate-800">
-                      {result.test?.title ||
-                        result.test?.name ||
-                        result.testTitle ||
-                        "Assessment"}
-                    </p>
-                    <p className="mt-1 text-xs text-slate-500">
-                      {formatDate(
-                        result.submittedAt || result.completedAt
-                      )}
-                    </p>
+              .map((result, index) => {
+                const percentage = getPercentage(result);
+
+                return (
+                  <div
+                    key={result._id || result.id || index}
+                    className="flex items-center justify-between gap-4 py-4"
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="rounded-xl bg-orange-50 p-2.5 text-orange-600">
+                        <FileCheck2 size={19} />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-[#172554]">
+                          {result.test?.title ||
+                            result.test?.name ||
+                            result.testTitle ||
+                            "Assessment"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {formatDate(result.submittedAt || result.completedAt)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="shrink-0 rounded-lg bg-orange-50 px-3 py-2 text-sm font-extrabold text-orange-600">
+                      {percentage !== null
+                        ? `${Math.round(percentage)}%`
+                        : result.score != null
+                          ? `${result.score} marks`
+                          : result.marksObtained != null
+                            ? `${result.marksObtained} marks`
+                            : "Submitted"}
+                    </span>
                   </div>
-                  <span className="shrink-0 rounded-lg bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-700">
-                    {result.percentage != null
-                      ? `${Math.round(Number(result.percentage))}%`
-                      : result.score != null
-                        ? `${result.score} marks`
-                        : result.marksObtained != null
-                          ? `${result.marksObtained} marks`
-                          : "Submitted"}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
           </div>
         </section>
       )}
@@ -810,72 +751,96 @@ export default function StudentDashboard({
   );
 }
 
-function PageHeader({
-  eyebrow,
-  title,
-  description,
-  onRefresh,
-  loading,
-}) {
+function PageHeader({ eyebrow, title, description, onRefresh, loading }) {
   return (
-    <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-gradient-to-r from-indigo-700 to-violet-600 p-6 text-white shadow-lg sm:p-8">
+    <section className="flex flex-wrap items-center justify-between gap-4 rounded-3xl bg-gradient-to-r from-[#172554] to-[#294477] p-6 text-white shadow-lg sm:p-8">
       <div>
-        <p className="text-sm font-medium text-indigo-100">{eyebrow}</p>
-        <h1 className="mt-2 text-2xl font-bold sm:text-3xl">{title}</h1>
-        <p className="mt-2 max-w-2xl text-sm text-indigo-100">
-          {description}
+        <p className="text-sm font-bold tracking-widest text-orange-300">
+          {eyebrow}
         </p>
+        <h1 className="mt-2 text-2xl font-extrabold sm:text-3xl">{title}</h1>
+        <p className="mt-2 max-w-2xl text-sm text-blue-100">{description}</p>
       </div>
 
       <button
         type="button"
         onClick={onRefresh}
         disabled={loading}
-        className="inline-flex items-center gap-2 rounded-xl border border-white/30 bg-white/10 px-4 py-2.5 text-sm font-semibold hover:bg-white/20 disabled:opacity-50"
+        className="inline-flex items-center gap-2 rounded-xl border border-white/30 bg-white/10 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-white/20 disabled:opacity-50"
       >
-        <RefreshCw
-          size={16}
-          className={loading ? "animate-spin" : ""}
-        />
+        <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
         Refresh
       </button>
     </section>
   );
 }
 
-function StatCard({ icon: Icon, label, value, detail, color }) {
-  const colors = {
-    indigo: "bg-indigo-50 text-indigo-700",
-    emerald: "bg-emerald-50 text-emerald-700",
-    violet: "bg-violet-50 text-violet-700",
-    amber: "bg-amber-50 text-amber-700",
+function SectionHeading({ icon: Icon, title, description }) {
+  return (
+    <div className="flex items-center gap-3">
+      <div className="rounded-xl bg-orange-50 p-3 text-orange-600">
+        <Icon size={21} />
+      </div>
+      <div>
+        <h2 className="font-extrabold text-[#172554]">{title}</h2>
+        {description && (
+          <p className="mt-0.5 text-sm text-slate-500">{description}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TextButton({ children, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 text-sm font-bold text-orange-600 transition hover:text-orange-700"
+    >
+      {children}
+    </button>
+  );
+}
+
+function StatCard({ icon: Icon, label, value, detail, accent }) {
+  const styles = {
+    navy: "bg-blue-50 text-[#172554]",
+    orange: "bg-orange-50 text-orange-600",
+    green: "bg-emerald-50 text-emerald-700",
+    purple: "bg-violet-50 text-violet-700",
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-orange-200 hover:shadow-md">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-slate-500">{label}</p>
-          <p className="mt-2 text-3xl font-bold text-slate-900">{value}</p>
+          <p className="text-sm font-semibold text-slate-500">{label}</p>
+          <p className="mt-2 text-3xl font-extrabold tracking-tight text-[#172554]">
+            {value}
+          </p>
         </div>
-        <div className={`rounded-xl p-3 ${colors[color]}`}>
+        <div className={`rounded-xl p-3 ${styles[accent] || styles.navy}`}>
           <Icon size={22} />
         </div>
       </div>
-      <p className="mt-3 text-xs text-slate-500">{detail}</p>
+      <p className="mt-3 text-xs font-medium text-slate-400">{detail}</p>
+      <div className="mt-4 h-1 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-full w-1/3 rounded-full bg-[#F97316] transition-all group-hover:w-2/3" />
+      </div>
     </div>
   );
 }
 
 function MiniStat({ icon: Icon, label, value }) {
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="rounded-xl bg-indigo-50 p-3 text-indigo-700">
+    <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-orange-200">
+      <div className="rounded-xl bg-orange-50 p-3 text-orange-600">
         <Icon size={20} />
       </div>
       <div>
         <p className="text-sm text-slate-500">{label}</p>
-        <p className="text-xl font-bold text-slate-900">{value}</p>
+        <p className="text-xl font-extrabold text-[#172554]">{value}</p>
       </div>
     </div>
   );
@@ -886,20 +851,16 @@ function QuickAction({ icon: Icon, title, description, onClick }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-3 rounded-xl border border-slate-100 p-3 text-left transition hover:border-indigo-100 hover:bg-indigo-50/50"
+      className="flex w-full items-center gap-3 rounded-xl border border-slate-100 p-3 text-left transition hover:border-orange-200 hover:bg-orange-50/50"
     >
-      <span className="rounded-lg bg-slate-100 p-2 text-slate-700">
+      <span className="rounded-lg bg-orange-50 p-2 text-orange-600">
         <Icon size={19} />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-slate-800">
-          {title}
-        </span>
-        <span className="mt-0.5 block text-xs text-slate-500">
-          {description}
-        </span>
+        <span className="block text-sm font-bold text-[#172554]">{title}</span>
+        <span className="mt-0.5 block text-xs text-slate-500">{description}</span>
       </span>
-      <ArrowRight size={16} className="text-slate-400" />
+      <ArrowRight size={16} className="text-orange-500" />
     </button>
   );
 }
@@ -914,17 +875,17 @@ function AssessmentCard({ test, onStart, now }) {
     Closed: "Test closed",
     Completed: "No attempts left",
     "In progress": "Resume test",
-    "Schedule missing": "Schedule unavailable",
+    "Schedule unavailable": "Schedule unavailable",
   }[status];
 
   return (
-    <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:border-indigo-200 hover:shadow-md sm:p-6">
+    <article className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-orange-200 hover:shadow-md sm:p-6">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold uppercase tracking-wider text-indigo-600">
+          <p className="text-xs font-extrabold uppercase tracking-wider text-orange-600">
             {test.subject?.code || "ASSESSMENT"}
           </p>
-          <h3 className="mt-2 break-words text-lg font-bold text-slate-900">
+          <h3 className="mt-2 break-words text-lg font-extrabold text-[#172554]">
             {test.title || test.name || "Untitled assessment"}
           </h3>
           <p className="mt-1 text-sm text-slate-500">
@@ -941,42 +902,26 @@ function AssessmentCard({ test, onStart, now }) {
       )}
 
       <div className="mt-5 grid grid-cols-2 gap-3">
-        <Info
-          icon={Clock3}
-          label="Duration"
-          value={`${test.durationMinutes ?? "—"} min`}
-        />
-        <Info
-          icon={Target}
-          label="Total marks"
-          value={test.totalMarks ?? "—"}
-        />
+        <Info icon={Clock3} label="Duration" value={`${test.durationMinutes ?? "—"} min`} />
+        <Info icon={Target} label="Total marks" value={test.totalMarks ?? "—"} />
         <Info
           icon={BookOpen}
           label="Questions"
           value={test.questionCount ?? test.questions?.length ?? "—"}
         />
-        <Info
-          icon={FileCheck2}
-          label="Attempts left"
-          value={test.attemptsRemaining ?? "—"}
-        />
+        <Info icon={FileCheck2} label="Attempts left" value={test.attemptsRemaining ?? "—"} />
       </div>
 
       <div className="mt-4 space-y-1">
-        <p className="text-xs text-slate-500">
-          Starts: {formatDate(test.startAt)}
-        </p>
-        <p className="text-xs text-slate-500">
-          Closes: {formatDate(test.endAt)}
-        </p>
+        <p className="text-xs text-slate-500">Starts: {formatDate(test.startAt)}</p>
+        <p className="text-xs text-slate-500">Closes: {formatDate(test.endAt)}</p>
       </div>
 
       <button
         type="button"
         disabled={!canStart}
         onClick={onStart}
-        className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+        className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-[#F97316] px-4 py-3 text-sm font-bold text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
       >
         <Play size={16} />
         {buttonLabel}
@@ -988,17 +933,18 @@ function AssessmentCard({ test, onStart, now }) {
 function StatusBadge({ status }) {
   const styles = {
     Available: "bg-emerald-50 text-emerald-700",
-    Upcoming: "bg-amber-50 text-amber-700",
+    Upcoming: "bg-orange-50 text-orange-700",
     Closed: "bg-slate-100 text-slate-600",
     Completed: "bg-slate-100 text-slate-600",
-    "In progress": "bg-indigo-50 text-indigo-700",
-    "Schedule missing": "bg-rose-50 text-rose-700",
+    "In progress": "bg-blue-50 text-blue-800",
+    "Schedule unavailable": "bg-rose-50 text-rose-700",
   };
 
   return (
     <span
-      className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold ${styles[status] || "bg-slate-100 text-slate-600"
-        }`}
+      className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
+        styles[status] || "bg-slate-100 text-slate-600"
+      }`}
     >
       {status}
     </span>
@@ -1012,7 +958,7 @@ function Info({ icon: Icon, label, value }) {
         <Icon size={14} />
         {label}
       </div>
-      <p className="mt-1.5 break-words text-sm font-bold text-slate-800">
+      <p className="mt-1.5 break-words text-sm font-bold text-[#172554]">
         {value}
       </p>
     </div>
@@ -1023,11 +969,7 @@ function ErrorMessage({ message, onRetry }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
       <span>{message}</span>
-      <button
-        type="button"
-        onClick={onRetry}
-        className="font-bold underline"
-      >
+      <button type="button" onClick={onRetry} className="font-bold underline">
         Try again
       </button>
     </div>
@@ -1037,19 +979,29 @@ function ErrorMessage({ message, onRetry }) {
 function EmptyState({ icon: Icon, title, description, action, onAction }) {
   return (
     <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-14 text-center">
-      <Icon size={38} className="mx-auto text-slate-400" />
-      <h3 className="mt-4 font-bold text-slate-800">{title}</h3>
+      <Icon size={38} className="mx-auto text-orange-400" />
+      <h3 className="mt-4 font-extrabold text-[#172554]">{title}</h3>
       <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
         {description}
       </p>
       <button
         type="button"
         onClick={onAction}
-        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700"
+        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#F97316] px-4 py-2.5 text-sm font-bold text-white transition hover:bg-orange-600"
       >
         <RefreshCw size={16} />
         {action}
       </button>
+    </div>
+  );
+}
+
+function EmptyInline({ icon: Icon, title, description }) {
+  return (
+    <div className="py-12 text-center">
+      <Icon size={36} className="mx-auto text-orange-300" />
+      <p className="mt-3 font-bold text-[#172554]">{title}</p>
+      <p className="mt-1 text-sm text-slate-500">{description}</p>
     </div>
   );
 }
@@ -1060,7 +1012,7 @@ function LoadingCards() {
       {[1, 2, 3, 4].map((item) => (
         <div
           key={item}
-          className="h-48 animate-pulse rounded-2xl bg-slate-100"
+          className="h-40 animate-pulse rounded-2xl bg-slate-100"
         />
       ))}
     </div>
