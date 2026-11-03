@@ -44,11 +44,11 @@ export default function TestResults() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <button
-            onClick={() => navigate("/admin/dashboard")}
+            onClick={() => navigate("/admin/results")}
             className="mb-3 inline-flex items-center gap-2 text-sm text-slate-500 hover:text-indigo-600"
           >
             <ArrowLeft size={16} />
-            Back to dashboard
+            Back to results
           </button>
           <h1 className="text-2xl font-bold text-slate-900">
             {data?.test?.title || "Test results"}
@@ -120,7 +120,9 @@ export default function TestResults() {
                       <tr key={student.attemptId}>
                         <td className="px-5 py-4">
                           <p className="font-semibold text-slate-900">
-                            {student.studentName}
+                            {(student.studentName || "").trim().charAt(0).toUpperCase() +
+                              (student.studentName || "").trim().slice(1)}
+
                           </p>
                           <p className="text-xs text-slate-500">
                             {student.email}

@@ -19,3 +19,42 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+@keyframes toast-slide {
+  0% {
+    opacity: 0;
+    transform: translateX(120%);
+  }
+
+  15% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  80% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(120%);
+  }
+}
+
+@keyframes toast-progress {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.animate-toast-slide {
+  animation: toast-slide 2s ease-in-out forwards;
+}
+
+.animate-toast-progress {
+  animation: toast-progress 2s linear forwards;
+}

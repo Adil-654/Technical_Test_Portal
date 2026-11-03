@@ -301,11 +301,13 @@ console.log("QUESTION IDS:", questionIds);
 console.log("QUESTION COUNT:", questionIds.length);
 console.log("POPULATED SUBJECT:", test.subject?._id);
 
-    const questions = await Question.find({
-      _id: { $in: questionIds },
-      subject: test.subject._id,
-      isActive: true,
-    }).select("questionText options correctOption marks");
+ const questions = await Question.find({
+  _id: { $in: questionIds },
+  subject: test.subject._id,
+  isActive: true,
+}).select(
+  "questionText options correctOption marks explanation topic"
+);
 
     const questionMap = new Map(
       questions.map((question) => [
@@ -367,16 +369,18 @@ console.log("POPULATED SUBJECT:", test.subject?._id);
       startedAt: now,
       expiresAt,
       totalMarks,
-      answers: orderedQuestions.map((question) => ({
-        question: question._id,
-        questionText: question.questionText,
-        options: (question.options || []).map((option) => ({
-          text: option.text,
-        })),
-        marks: Number(question.marks) || 0,
-        correctOption: question.correctOption,
-        selectedOption: null,
-      })),
+     answers: orderedQuestions.map((question) => ({
+  question: question._id,
+  questionText: question.questionText,
+  options: (question.options || []).map((option) => ({
+    text: option.text,
+  })),
+  marks: Number(question.marks) || 0,
+  correctOption: question.correctOption,
+  selectedOption: null,
+  explanation: question.explanation || "",
+  topic: question.topic?.trim() || "Uncategorized",
+})),
     });
 
     return res.status(201).json({
@@ -577,6 +581,155 @@ export async function submitTestAttempt(req, res, next) {
     });
   } catch (error) {
     console.error("submitTestAttempt error:", error);
+    return next(error);
+  }
+}
+
+/* ==================== REVIEW FINALIZED ATTEMPT ==================== */
+
+export async function getAttemptReview(req, res, next) {
+  try {
+    const { attemptId } = req.params;
+
+    if (!mongoose.isValidObjectId(attemptId)) {
+      return sendError(res, 400, "Invalid attempt ID.");
+    }
+
+    const attempt = await TestAttempt.findOne({
+      _id: attemptId,
+      student: req.user._id,
+      status: { $in: ["submitted", "expired"] },
+      submittedAt: { $ne: null },
+    })
+      .select("+answers.correctOption")
+      .populate({
+        path: "test",
+        select: "title subject",
+        populate: {
+          path: "subject",
+          select: "name code",
+        },
+      })
+      .lean();
+
+    if (!attempt) {
+      return sendError(
+        res,
+        404,
+        "Finalized assessment attempt not found."
+      );
+    }
+
+    const answers = (attempt.answers || []).map((answer, index) => {
+      const selectedOption =
+        Number.isInteger(answer.selectedOption)
+          ? answer.selectedOption
+          : null;
+
+      const correctOption = answer.correctOption;
+      const isCorrect =
+        selectedOption !== null &&
+        selectedOption === correctOption;
+
+      return {
+        questionNumber: index + 1,
+        questionId: String(answer.question),
+        questionText: answer.questionText,
+        options: (answer.options || []).map((option) => option.text),
+        selectedOption,
+        correctOption,
+        isCorrect,
+        isAttempted: selectedOption !== null,
+        marks: Number(answer.marks) || 0,
+        marksAwarded: isCorrect ? Number(answer.marks) || 0 : 0,
+        explanation: answer.explanation || "",
+        topic: answer.topic?.trim() || "Uncategorized",
+      };
+    });
+
+    const totalQuestions = answers.length;
+    const correct = answers.filter((answer) => answer.isCorrect).length;
+    const incorrect = answers.filter(
+      (answer) => answer.isAttempted && !answer.isCorrect
+    ).length;
+    const unanswered = answers.filter(
+      (answer) => !answer.isAttempted
+    ).length;
+
+    const topicMap = new Map();
+
+    for (const answer of answers) {
+      const topic = answer.topic;
+
+      if (!topicMap.has(topic)) {
+        topicMap.set(topic, {
+          topic,
+          total: 0,
+          correct: 0,
+          incorrect: 0,
+          unanswered: 0,
+          marksAwarded: 0,
+          totalMarks: 0,
+        });
+      }
+
+      const item = topicMap.get(topic);
+
+      item.total += 1;
+      item.totalMarks += answer.marks;
+      item.marksAwarded += answer.marksAwarded;
+
+      if (answer.isCorrect) {
+        item.correct += 1;
+      } else if (answer.isAttempted) {
+        item.incorrect += 1;
+      } else {
+        item.unanswered += 1;
+      }
+    }
+
+    const topics = Array.from(topicMap.values()).map((item) => ({
+      ...item,
+      percentage:
+        item.totalMarks > 0
+          ? Number(
+              ((item.marksAwarded / item.totalMarks) * 100).toFixed(2)
+            )
+          : 0,
+      performance:
+        item.totalMarks > 0 &&
+        (item.marksAwarded / item.totalMarks) * 100 >= 70
+          ? "Strong"
+          : item.totalMarks > 0 &&
+              (item.marksAwarded / item.totalMarks) * 100 >= 40
+            ? "Average"
+            : "Weak",
+    }));
+
+    return res.status(200).json({
+      success: true,
+      review: {
+        attemptId: String(attempt._id),
+        testTitle: attempt.test?.title || "Assessment",
+        subjectName: attempt.test?.subject?.name || "",
+        attemptNumber: attempt.attemptNumber,
+        status: attempt.status,
+        submittedAt: attempt.submittedAt,
+        score: attempt.score ?? 0,
+        totalMarks: attempt.totalMarks ?? 0,
+        percentage: attempt.percentage ?? 0,
+        summary: {
+          totalQuestions,
+          correct,
+          incorrect,
+          unanswered,
+        },
+        answers,
+        topics,
+      },
+    });
+  } catch (error) {
+    console.error("getAttemptReview error:", error);
     return next(error);
   }
 }

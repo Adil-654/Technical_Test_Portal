@@ -27,6 +27,12 @@ const questionSchema = new mongoose.Schema(
       default: "mcq",
       required: true,
     },
+    topic: {
+  type: String,
+  trim: true,
+  default: "Uncategorized",
+  maxlength: 100,
+},
     options: {
       type: [
         {

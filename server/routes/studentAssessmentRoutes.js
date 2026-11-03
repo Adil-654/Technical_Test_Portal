@@ -7,6 +7,7 @@ import {
   getTestAttempt,
   saveTestAnswers,
   submitTestAttempt,
+  getAttemptReview,
 } from "../controller/studentAssessmentController.js";
 
 import { getStudentResults } from "../controller/studentResultsController.js";
@@ -26,6 +27,8 @@ router.get("/", getAvailableTests);
 
 // Results must be registered before parameterized attempt routes.
 router.get("/results", getStudentResults);
+
+router.get("/attempts/:attemptId/review", getAttemptReview);
 
 // Start or resume an assessment.
 router.post("/:testId/start", startTestAttempt);

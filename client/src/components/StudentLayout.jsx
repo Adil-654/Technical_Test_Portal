@@ -65,7 +65,7 @@ export default function StudentLayout({ user, onLogout }) {
   const activePage = isExamPage
     ? "Assessment in Progress"
     : navigation.find((item) => item.path === location.pathname)?.label ||
-      "Dashboard";
+    "Dashboard";
 
   const studentName = user?.name || "Student";
 
@@ -111,8 +111,8 @@ export default function StudentLayout({ user, onLogout }) {
     } catch (error) {
       setStartError(
         error.response?.data?.message ||
-          error.message ||
-          "Unable to start this assessment."
+        error.message ||
+        "Unable to start this assessment."
       );
     } finally {
       setStartingTest(false);
@@ -158,9 +158,8 @@ export default function StudentLayout({ user, onLogout }) {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col overflow-y-auto border-r border-white/10 bg-[#19284F] text-white shadow-2xl transition-transform duration-300 ${
-          mobileOpen ? "translate-x-0" : "-translate-x-full"
-        } lg:translate-x-0`}
+        className={`fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col overflow-y-auto border-r border-white/10 bg-[#19284F] text-white shadow-2xl transition-transform duration-300 ${mobileOpen ? "translate-x-0" : "-translate-x-full"
+          } lg:translate-x-0`}
       >
 
         {/* Brand */}
@@ -199,7 +198,8 @@ export default function StudentLayout({ user, onLogout }) {
 
             <div className="min-w-0 flex-1">
               <p className="truncate text-[13px] font-bold text-white">
-                {studentName}
+                {(studentName || "").trim().charAt(0).toUpperCase() +
+                  (studentName || "").trim().slice(1)}
               </p>
               <p className="mt-1 truncate text-[11px] text-blue-100/60">
                 {user?.email || "Student account"}
@@ -226,10 +226,9 @@ export default function StudentLayout({ user, onLogout }) {
                 end
                 onClick={closeMobileMenu}
                 className={({ isActive }) =>
-                  `group flex items-center gap-3 rounded-xl px-3.5 py-3 transition-all duration-200 ${
-                    isActive
-                      ? "bg-[#FF7417] text-white shadow-lg shadow-orange-950/20"
-                      : "text-blue-100/65 hover:bg-white/[0.07] hover:text-white"
+                  `group flex items-center gap-3 rounded-xl px-3.5 py-3 transition-all duration-200 ${isActive
+                    ? "bg-[#FF7417] text-white shadow-lg shadow-orange-950/20"
+                    : "text-blue-100/65 hover:bg-white/[0.07] hover:text-white"
                   }`
                 }
               >
@@ -306,10 +305,11 @@ export default function StudentLayout({ user, onLogout }) {
           <div className="flex items-center gap-3">
             <div className="hidden text-right sm:block">
               <p className="text-[13px] font-bold text-[#19284F]">
-                {studentName}
+                {(studentName || "").trim().charAt(0).toUpperCase() +
+                  (studentName || "").trim().slice(1)}
               </p>
               <p className="mt-0.5 text-[10px] text-slate-400">
-                Student account
+                Student
               </p>
             </div>
 

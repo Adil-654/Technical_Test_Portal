@@ -27,6 +27,19 @@ const attemptAnswerSchema = new mongoose.Schema(
       required: true,
     },
 
+    topic: {
+  type: String,
+  trim: true,
+  default: "Uncategorized",
+  maxlength: 100,
+},
+
+explanation: {
+  type: String,
+  trim: true,
+  default: "",
+  maxlength: 3000,
+},
     marks: {
       type: Number,
       required: true,
@@ -48,6 +61,7 @@ const attemptAnswerSchema = new mongoose.Schema(
       max: 3,
       default: null,
     },
+    
   },
   { _id: false }
 );

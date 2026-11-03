@@ -1,5 +1,11 @@
-
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  lazy,
+  Suspense,
+} from "react";
 import {
   Award,
   BookOpen,
@@ -17,14 +23,19 @@ import {
   Library,
   Trophy,
   Zap,
+  X,
+  Check,
+  XCircle,
+  MinusCircle,
+  BarChart3,
+  Eye,
+  Lightbulb,
+  Loader2,
 } from "lucide-react";
 import api from "../services/api";
-
-const theme = {
-  navy: "#172554",
-  orange: "#F97316",
-  lightOrange: "#FDBA74",
-};
+const Assessment3DCharts = lazy(
+  () => import("../components/Assessment3DCharts")
+);
 
 function formatDate(value) {
   if (!value) return "Not scheduled";
@@ -96,10 +107,18 @@ function getErrorMessage(error, fallback) {
   const status = error?.response?.status;
   const message = error?.response?.data?.message;
 
-  if (status === 401) return "Your session may have expired. Please log in again.";
-  if (status === 403) return "You do not have permission to access this information.";
-  if (status === 404) return "The requested API route was not found. Check the backend route configuration.";
-  if (status >= 500) return message || "The server encountered an error. Check the backend terminal.";
+  if (status === 401) {
+    return "Your session may have expired. Please log in again.";
+  }
+  if (status === 403) {
+    return "You do not have permission to access this information.";
+  }
+  if (status === 404) {
+    return "The requested API route was not found. Check the backend route configuration.";
+  }
+  if (status >= 500) {
+    return message || "The server encountered an error. Check the backend terminal.";
+  }
 
   return message || error?.message || fallback;
 }
@@ -123,6 +142,18 @@ function getPercentage(result) {
     : null;
 }
 
+function getAssessmentName(result) {
+  const name =
+    result.test?.title ||
+    result.test?.name ||
+    result.testTitle ||
+    result.title;
+
+  return typeof name === "string" && name.trim()
+    ? name.trim()
+    : null;
+}
+
 function getCompletedResults(results) {
   return results.filter((result) => {
     const status = String(result.status || "").toLowerCase();
@@ -132,6 +163,20 @@ function getCompletedResults(results) {
       Boolean(result.submittedAt || result.completedAt)
     );
   });
+}
+
+function getAttemptId(result) {
+  return result._id || result.id || result.attemptId;
+}
+
+function getReviewData(response) {
+  const data = response?.data;
+
+  if (data?.review) return data.review;
+  if (data?.data?.review) return data.data.review;
+  if (data?.data) return data.data;
+
+  return data || null;
 }
 
 export default function StudentDashboard({
@@ -146,6 +191,12 @@ export default function StudentDashboard({
   const [error, setError] = useState("");
   const [resultsError, setResultsError] = useState("");
   const [currentTime, setCurrentTime] = useState(Date.now());
+
+  // Assessment review modal state
+  const [selectedResult, setSelectedResult] = useState(null);
+  const [review, setReview] = useState(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState("");
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -209,6 +260,60 @@ export default function StudentDashboard({
     return () => clearInterval(interval);
   }, []);
 
+  // Close the modal with Escape and prevent background scrolling.
+  useEffect(() => {
+    if (!selectedResult) return;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") closeReview();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.body.style.overflow = "hidden";
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = "";
+    };
+  }, [selectedResult]);
+
+  const closeReview = () => {
+    setSelectedResult(null);
+    setReview(null);
+    setReviewError("");
+    setReviewLoading(false);
+  };
+
+  const openReview = async (result) => {
+    const attemptId = getAttemptId(result);
+
+    if (!attemptId) {
+      setSelectedResult(result);
+      setReview(null);
+      setReviewError("Attempt ID is missing. Unable to load the answer sheet.");
+      return;
+    }
+
+    setSelectedResult(result);
+    setReview(null);
+    setReviewError("");
+    setReviewLoading(true);
+
+    try {
+      const response = await api.get(
+        `/student-assessments/attempts/${attemptId}/review`
+      );
+
+      setReview(getReviewData(response));
+    } catch (err) {
+      setReviewError(
+        getErrorMessage(err, "Unable to load the assessment review.")
+      );
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
   const availableTests = useMemo(
     () => tests.filter((test) => canStartTest(test, currentTime)),
     [tests, currentTime]
@@ -228,6 +333,11 @@ export default function StudentDashboard({
   const completedResults = useMemo(
     () => getCompletedResults(results),
     [results]
+  );
+
+  const namedCompletedResults = useMemo(
+    () => completedResults.filter((result) => getAssessmentName(result)),
+    [completedResults]
   );
 
   const percentages = useMemo(
@@ -306,86 +416,152 @@ export default function StudentDashboard({
               <div className="border-b border-slate-100 p-5 sm:p-6">
                 <SectionHeading
                   icon={Award}
-                  title="Assessment history"
-                  description="Your completed and submitted attempts."
+                  title="Assessment History"
+                  description="Select an assessment to view your answer sheet and topic-wise performance."
                 />
               </div>
 
-              <div className="divide-y divide-slate-100">
-                {[...completedResults]
-                  .sort(
-                    (a, b) =>
-                      new Date(b.submittedAt || b.completedAt || 0).getTime() -
-                      new Date(a.submittedAt || a.completedAt || 0).getTime()
-                  )
-                  .map((result, index) => {
-                    const score = Number(
-                      result.score ??
-                        result.marksObtained ??
-                        result.obtainedMarks
-                    );
-                    const total = Number(
-                      result.totalMarks ??
-                        result.maxMarks ??
-                        result.test?.totalMarks
-                    );
-                    const percentage = getPercentage(result);
-                    const status = String(result.status || "Submitted");
+              {namedCompletedResults.length === 0 ? (
+                <div className="p-8 text-center">
+                  <p className="font-semibold text-slate-600">
+                    Assessment names are unavailable.
+                  </p>
+                  <p className="mt-2 text-sm text-slate-500">
+                    Please try refreshing. If the issue continues, the results
+                    API needs to return the associated test title.
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[650px] text-left">
+                    <thead className="bg-slate-50">
+                      <tr className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                        <th className="px-6 py-4">Assessment</th>
+                        <th className="px-6 py-4">Status</th>
+                        <th className="px-6 py-4 text-center">Marks</th>
+                        <th className="px-6 py-4 text-center">Percentage</th>
+                        <th className="px-6 py-4 text-right">Review</th>
+                      </tr>
+                    </thead>
 
-                    return (
-                      <div
-                        key={result._id || result.id || index}
-                        className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"
-                      >
-                        <div className="flex min-w-0 items-start gap-4">
-                          <div className="rounded-xl bg-orange-50 p-3 text-orange-600">
-                            <FileCheck2 size={22} />
-                          </div>
+                    <tbody className="divide-y divide-slate-100">
+                      {[...namedCompletedResults]
+                        .sort(
+                          (a, b) =>
+                            new Date(
+                              b.submittedAt || b.completedAt || 0
+                            ).getTime() -
+                            new Date(
+                              a.submittedAt || a.completedAt || 0
+                            ).getTime()
+                        )
+                        .map((result, index) => {
+                          const score = Number(
+                            result.score ??
+                              result.marksObtained ??
+                              result.obtainedMarks
+                          );
 
-                          <div className="min-w-0">
-                            <h3 className="font-bold text-slate-900">
-                              {result.test?.title ||
-                                result.test?.name ||
-                                result.testTitle ||
-                                "Assessment"}
-                            </h3>
-                            <p className="mt-1 text-sm text-slate-500">
-                              {result.test?.subject?.name ||
-                                result.subject?.name ||
-                                "Assessment result"}
-                            </p>
-                            <p className="mt-2 text-xs text-slate-400">
-                              Submitted:{" "}
-                              {formatDate(
-                                result.submittedAt || result.completedAt
-                              )}
-                            </p>
-                            <span className="mt-2 inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold capitalize text-slate-600">
-                              {status}
-                            </span>
-                          </div>
-                        </div>
+                          const total = Number(
+                            result.totalMarks ??
+                              result.maxMarks ??
+                              result.test?.totalMarks
+                          );
 
-                        <div className="rounded-xl bg-orange-50 px-5 py-3 sm:text-right">
-                          <p className="text-2xl font-extrabold text-orange-600">
-                            {percentage === null
-                              ? "—"
-                              : `${Math.round(percentage)}%`}
-                          </p>
-                          <p className="mt-1 text-sm text-slate-600">
-                            {Number.isFinite(score) &&
-                            Number.isFinite(total) &&
-                            total > 0
-                              ? `${score} / ${total} marks`
-                              : "Score"}
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })}
+                          const percentage = getPercentage(result);
+                          const testName = getAssessmentName(result);
+                          const status = String(result.status || "Submitted");
+
+                          return (
+                            <tr
+                              key={getAttemptId(result) || index}
+                              onClick={() => openReview(result)}
+                              onKeyDown={(event) => {
+                                if (
+                                  event.key === "Enter" ||
+                                  event.key === " "
+                                ) {
+                                  event.preventDefault();
+                                  openReview(result);
+                                }
+                              }}
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`View review for ${testName}`}
+                              className="cursor-pointer transition hover:bg-orange-50/50 focus:bg-orange-50/50 focus:outline-none"
+                            >
+                              <td className="px-6 py-5">
+                                <p className="font-bold text-[#172554]">
+                                  {testName}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">
+                                  {formatDate(
+                                    result.submittedAt || result.completedAt
+                                  )}
+                                </p>
+                              </td>
+
+                              <td className="px-6 py-5">
+                                <span
+                                  className={`inline-flex rounded-full px-3 py-1.5 text-xs font-bold capitalize ${
+                                    status.toLowerCase() === "expired"
+                                      ? "bg-amber-50 text-amber-700"
+                                      : "bg-emerald-50 text-emerald-700"
+                                  }`}
+                                >
+                                  {status}
+                                </span>
+                              </td>
+
+                              <td className="px-6 py-5 text-center">
+                                <span className="font-bold text-slate-700">
+                                  {Number.isFinite(score) &&
+                                  Number.isFinite(total) &&
+                                  total > 0
+                                    ? `${score} / ${total}`
+                                    : "—"}
+                                </span>
+                              </td>
+
+                              <td className="px-6 py-5 text-center">
+                                <span className="font-extrabold text-orange-600">
+                                  {percentage !== null
+                                    ? `${Math.round(percentage)}%`
+                                    : "—"}
+                                </span>
+                              </td>
+
+                              <td className="px-6 py-5 text-right">
+                                <span className="inline-flex items-center gap-2 rounded-lg bg-orange-50 px-3 py-2 text-xs font-bold text-orange-700 transition group-hover:bg-orange-100">
+                                  <Eye size={15} />
+                                  View details
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="border-t border-slate-100 bg-slate-50/70 px-5 py-3 text-xs text-slate-500">
+                <Eye size={13} className="mr-1 inline" />
+                Click any assessment row to view its detailed performance.
               </div>
             </section>
           </>
+        )}
+
+        {selectedResult && (
+          <ReviewModal
+            result={selectedResult}
+            review={review}
+            loading={reviewLoading}
+            error={reviewError}
+            onClose={closeReview}
+            onRetry={() => openReview(selectedResult)}
+          />
         )}
       </div>
     );
@@ -454,7 +630,6 @@ export default function StudentDashboard({
 
   return (
     <div className="space-y-7">
-      {/* Welcome banner */}
       <section className="relative isolate overflow-hidden rounded-3xl bg-gradient-to-br from-[#172554] via-[#1E3A70] to-[#F97316] p-7 text-white shadow-xl sm:p-9">
         <div className="pointer-events-none absolute -right-16 -top-20 h-72 w-72 rounded-full bg-orange-300/20 blur-3xl" />
         <div className="pointer-events-none absolute -bottom-24 right-1/4 h-64 w-64 rounded-full bg-blue-400/20 blur-3xl" />
@@ -509,7 +684,6 @@ export default function StudentDashboard({
 
       {error && <ErrorMessage message={error} onRetry={loadData} />}
 
-      {/* Statistics */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           icon={BookOpen}
@@ -541,7 +715,6 @@ export default function StudentDashboard({
         />
       </section>
 
-      {/* Main dashboard content */}
       <section className="grid gap-6 xl:grid-cols-3">
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 xl:col-span-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -623,7 +796,6 @@ export default function StudentDashboard({
           )}
         </div>
 
-        {/* Progress panel */}
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <SectionHeading
             icon={Award}
@@ -685,7 +857,6 @@ export default function StudentDashboard({
         </div>
       </section>
 
-      {/* Recent activity */}
       {!loading && completedResults.length > 0 && (
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -700,7 +871,7 @@ export default function StudentDashboard({
           </div>
 
           <div className="mt-4 divide-y divide-slate-100">
-            {[...completedResults]
+            {[...namedCompletedResults]
               .sort(
                 (a, b) =>
                   new Date(b.submittedAt || b.completedAt || 0).getTime() -
@@ -711,9 +882,11 @@ export default function StudentDashboard({
                 const percentage = getPercentage(result);
 
                 return (
-                  <div
-                    key={result._id || result.id || index}
-                    className="flex items-center justify-between gap-4 py-4"
+                  <button
+                    type="button"
+                    key={getAttemptId(result) || index}
+                    onClick={() => openReview(result)}
+                    className="flex w-full items-center justify-between gap-4 py-4 text-left transition hover:bg-orange-50/30"
                   >
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="rounded-xl bg-orange-50 p-2.5 text-orange-600">
@@ -721,10 +894,7 @@ export default function StudentDashboard({
                       </div>
                       <div className="min-w-0">
                         <p className="truncate font-semibold text-[#172554]">
-                          {result.test?.title ||
-                            result.test?.name ||
-                            result.testTitle ||
-                            "Assessment"}
+                          {getAssessmentName(result)}
                         </p>
                         <p className="mt-1 text-xs text-slate-500">
                           {formatDate(result.submittedAt || result.completedAt)}
@@ -741,15 +911,660 @@ export default function StudentDashboard({
                             ? `${result.marksObtained} marks`
                             : "Submitted"}
                     </span>
-                  </div>
+                  </button>
                 );
               })}
           </div>
         </section>
       )}
+
+      {selectedResult && (
+        <ReviewModal
+          result={selectedResult}
+          review={review}
+          loading={reviewLoading}
+          error={reviewError}
+          onClose={closeReview}
+          onRetry={() => openReview(selectedResult)}
+        />
+      )}
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Assessment review modal                                                    */
+/* -------------------------------------------------------------------------- */
+
+function ReviewModal({ result, review, loading, error, onClose, onRetry }) {
+  const summary = review?.summary || {};
+  const answers = Array.isArray(review?.answers) ? review.answers : [];
+  const topics = Array.isArray(review?.topics) ? review.topics : [];
+
+  const totalQuestions = Number(
+    summary.totalQuestions ?? answers.length
+  );
+
+  const correct = Number(summary.correct ?? 0);
+  const incorrect = Number(summary.incorrect ?? 0);
+  const unanswered = Number(summary.unanswered ?? 0);
+
+  const assessmentName =
+    review?.testTitle || getAssessmentName(result) || "Assessment review";
+
+  const score = review?.score ?? result.score ?? result.marksObtained;
+  const totalMarks =
+    review?.totalMarks ?? result.totalMarks ?? result.test?.totalMarks;
+
+  const percentage =
+    review?.percentage != null
+      ? Number(review.percentage)
+      : getPercentage(result);
+
+  const questionStats = [
+    { label: "Correct", value: correct, color: "#10b981" },
+    { label: "Incorrect", value: incorrect, color: "#ef4444" },
+    { label: "Unanswered", value: unanswered, color: "#94a3b8" },
+  ];
+
+  const questionSegments = buildSegments(questionStats);
+
+  const topicStats = [
+    {
+      label: "Strong",
+      value: topics.filter((topic) => getTopicCategory(topic) === "Strong").length,
+      color: "#10b981",
+    },
+    {
+      label: "Average",
+      value: topics.filter((topic) => getTopicCategory(topic) === "Average").length,
+      color: "#f59e0b",
+    },
+    {
+      label: "Weak",
+      value: topics.filter((topic) => getTopicCategory(topic) === "Weak").length,
+      color: "#ef4444",
+    },
+  ];
+
+  const topicSegments = buildSegments(topicStats);
+
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-2 backdrop-blur-sm sm:p-5"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="review-modal-title"
+        className="flex max-h-[95vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-slate-50 shadow-2xl"
+      >
+        <header className="flex items-start justify-between gap-4 bg-[#172554] px-5 py-5 text-white sm:px-7">
+          <div className="min-w-0">
+            <p className="text-xs font-bold uppercase tracking-widest text-orange-300">
+              ASSESSMENT REVIEW
+            </p>
+            <h2
+              id="review-modal-title"
+              className="mt-1 truncate text-xl font-extrabold sm:text-2xl"
+            >
+              {assessmentName}
+            </h2>
+            <p className="mt-1 text-xs text-blue-200">
+              {formatDate(
+                review?.submittedAt ||
+                  result.submittedAt ||
+                  result.completedAt
+              )}
+              {review?.attemptNumber
+                ? ` · Attempt ${review.attemptNumber}`
+                : ""}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close review"
+            className="shrink-0 rounded-xl border border-white/20 bg-white/10 p-2.5 text-white transition hover:bg-white/20"
+          >
+            <X size={20} />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+          {loading ? (
+            <div className="flex min-h-[350px] flex-col items-center justify-center text-center">
+              <Loader2 size={38} className="animate-spin text-orange-500" />
+              <p className="mt-4 font-bold text-[#172554]">
+                Loading your assessment review...
+              </p>
+              <p className="mt-1 text-sm text-slate-500">
+                Fetching answers and topic-wise performance.
+              </p>
+            </div>
+          ) : error ? (
+            <div className="flex min-h-[300px] flex-col items-center justify-center text-center">
+              <AlertCircle size={40} className="text-red-500" />
+              <h3 className="mt-4 font-bold text-[#172554]">
+                Unable to load review
+              </h3>
+              <p className="mt-2 max-w-md text-sm text-slate-500">{error}</p>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#F97316] px-5 py-2.5 text-sm font-bold text-white hover:bg-orange-600"
+              >
+                <RefreshCw size={15} />
+                Try again
+              </button>
+            </div>
+          ) : !review ? (
+            <div className="py-12 text-center text-sm text-slate-500">
+              No review data was returned by the server.
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Score summary */}
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <ReviewStat
+                  label="Your score"
+                  value={
+                    score != null && totalMarks != null
+                      ? `${score} / ${totalMarks}`
+                      : "—"
+                  }
+                  icon={Award}
+                  color="orange"
+                />
+                <ReviewStat
+                  label="Percentage"
+                  value={
+                    Number.isFinite(percentage)
+                      ? `${Math.round(percentage)}%`
+                      : "—"
+                  }
+                  icon={TrendingUp}
+                  color="blue"
+                />
+                <ReviewStat
+                  label="Correct answers"
+                  value={correct}
+                  icon={CheckCircle2}
+                  color="green"
+                />
+                <ReviewStat
+                  label="Total questions"
+                  value={totalQuestions}
+                  icon={FileCheck2}
+                  color="purple"
+                />
+              </div>
+
+              {/* Charts */}
+              <div className="grid gap-5 lg:grid-cols-2">
+                <ChartCard
+                  title="Question outcome"
+                  description="How you performed across all questions."
+                >
+                  {totalQuestions > 0 ? (
+                    <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
+                      <DonutChart
+                        segments={questionSegments}
+                        total={totalQuestions}
+                        centerLabel="Questions"
+                      />
+                      <ChartLegend stats={questionStats} total={totalQuestions} />
+                    </div>
+                  ) : (
+                    <ChartEmpty />
+                  )}
+                </ChartCard>
+
+                <ChartCard
+                  title="Topic performance"
+                  description="Distribution of topics by your performance."
+                >
+                  {topics.length > 0 ? (
+                    <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-center">
+                      <DonutChart
+                        segments={topicSegments}
+                        total={topics.length}
+                        centerLabel="Topics"
+                      />
+                      <ChartLegend stats={topicStats} total={topics.length} />
+                    </div>
+                  ) : (
+                    <ChartEmpty message="Topic performance is not available yet." />
+                  )}
+                </ChartCard>
+              </div>
+
+              {/* Topic breakdown */}
+              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 p-5">
+                  <SectionHeading
+                    icon={BarChart3}
+                    title="Topic-wise performance"
+                    description="Review your accuracy and marks for each topic."
+                  />
+                </div>
+
+                {topics.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-slate-500">
+                    No topic information is available for this attempt. Topics
+                    will appear here after questions are tagged in the Question
+                    Bank and new attempts are created.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {topics.map((topic, index) => (
+                      <TopicPerformanceRow
+                        key={topic.topic || topic.name || index}
+                        topic={topic}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Answer sheet */}
+              <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <div className="border-b border-slate-100 p-5">
+                  <SectionHeading
+                    icon={FileCheck2}
+                    title="Answer sheet"
+                    description="Your selected answers, correct answers and explanations."
+                  />
+                </div>
+
+                {answers.length === 0 ? (
+                  <div className="p-8 text-center text-sm text-slate-500">
+                    No answer details are available for this attempt.
+                  </div>
+                ) : (
+                  <div className="space-y-4 p-4 sm:p-5">
+                    {answers.map((answer, index) => (
+                      <AnswerCard
+                        key={answer.questionId || answer.question || index}
+                        answer={answer}
+                        index={index}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </div>
+
+        <footer className="flex items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-3">
+          <span className="text-xs text-slate-400">
+            TestPilot · Assessment review
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl bg-[#172554] px-5 py-2.5 text-sm font-bold text-white transition hover:bg-blue-900"
+          >
+            Close review
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function buildSegments(stats) {
+  const total = stats.reduce((sum, item) => sum + item.value, 0);
+
+  if (!total) return [];
+
+  let current = 0;
+
+  return stats.map((item) => {
+    const start = current;
+    current += (item.value / total) * 100;
+
+    return {
+      ...item,
+      start,
+      end: current,
+    };
+  });
+}
+
+function DonutChart({ segments, total, centerLabel }) {
+  const gradient = segments.length
+    ? `conic-gradient(${segments
+        .map(
+          (segment) =>
+            `${segment.color} ${segment.start}% ${segment.end}%`
+        )
+        .join(", ")})`
+    : "#e2e8f0";
+
+  return (
+    <div
+      className="relative flex h-44 w-44 shrink-0 items-center justify-center rounded-full"
+      style={{ background: gradient }}
+      role="img"
+      aria-label={`${total} ${centerLabel.toLowerCase()}`}
+    >
+      <div className="flex h-28 w-28 flex-col items-center justify-center rounded-full bg-white shadow-inner">
+        <span className="text-3xl font-extrabold text-[#172554]">{total}</span>
+        <span className="text-xs font-medium text-slate-400">{centerLabel}</span>
+      </div>
+    </div>
+  );
+}
+
+function ChartLegend({ stats, total }) {
+  return (
+    <div className="w-full max-w-xs space-y-3">
+      {stats.map((item) => (
+        <div key={item.label} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-2 text-sm text-slate-600">
+            <span
+              className="h-3 w-3 rounded-sm"
+              style={{ backgroundColor: item.color }}
+            />
+            {item.label}
+          </span>
+          <span className="text-sm font-bold text-[#172554]">
+            {item.value}
+            <span className="ml-2 text-xs font-medium text-slate-400">
+              ({total ? Math.round((item.value / total) * 100) : 0}%)
+            </span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ChartCard({ title, description, children }) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h3 className="font-extrabold text-[#172554]">{title}</h3>
+      <p className="mt-1 text-xs text-slate-500">{description}</p>
+      <div className="mt-6 flex min-h-[190px] items-center justify-center">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function ChartEmpty({ message = "No chart data available." }) {
+  return (
+    <div className="py-10 text-center text-sm text-slate-400">
+      <BarChart3 size={30} className="mx-auto mb-2 text-slate-300" />
+      {message}
+    </div>
+  );
+}
+
+function ReviewStat({ label, value, icon: Icon, color }) {
+  const styles = {
+    orange: "bg-orange-50 text-orange-600",
+    blue: "bg-blue-50 text-blue-700",
+    green: "bg-emerald-50 text-emerald-700",
+    purple: "bg-violet-50 text-violet-700",
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold text-slate-500">{label}</p>
+        <span className={`rounded-lg p-2 ${styles[color] || styles.blue}`}>
+          <Icon size={17} />
+        </span>
+      </div>
+      <p className="mt-3 text-2xl font-extrabold text-[#172554]">{value}</p>
+    </div>
+  );
+}
+
+function getTopicCategory(topic) {
+  const percentage = Number(topic.percentage ?? 0);
+
+  if (topic.performance) {
+    const value = String(topic.performance).toLowerCase();
+
+    if (value === "strong") return "Strong";
+    if (value === "average") return "Average";
+    if (value === "weak") return "Weak";
+  }
+
+  if (percentage >= 70) return "Strong";
+  if (percentage >= 40) return "Average";
+  return "Weak";
+}
+
+function TopicPerformanceRow({ topic }) {
+  const name = topic.topic || topic.name || "Uncategorized";
+  const percentage = Math.min(
+    100,
+    Math.max(0, Number(topic.percentage) || 0)
+  );
+
+  const category = getTopicCategory(topic);
+
+  const styles = {
+    Strong: {
+      badge: "bg-emerald-50 text-emerald-700",
+      bar: "bg-emerald-500",
+    },
+    Average: {
+      badge: "bg-amber-50 text-amber-700",
+      bar: "bg-amber-500",
+    },
+    Weak: {
+      badge: "bg-red-50 text-red-700",
+      bar: "bg-red-500",
+    },
+  };
+
+  const style = styles[category];
+
+  return (
+    <div className="p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="font-bold text-[#172554]">{name}</h4>
+          <p className="mt-1 text-xs text-slate-500">
+            {Number(topic.correct) || 0} correct ·{" "}
+            {Number(topic.incorrect) || 0} incorrect ·{" "}
+            {Number(topic.unanswered) || 0} unanswered
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-extrabold text-[#172554]">
+            {Math.round(percentage)}%
+          </span>
+          <span
+            className={`rounded-full px-3 py-1 text-xs font-bold ${style.badge}`}
+          >
+            {category}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-100">
+        <div
+          className={`h-full rounded-full transition-all ${style.bar}`}
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+
+      <div className="mt-2 flex flex-wrap justify-between gap-2 text-xs text-slate-400">
+        <span>
+          Marks: {topic.marksAwarded ?? 0} / {topic.totalMarks ?? 0}
+        </span>
+        <span>{topic.total ?? 0} question(s)</span>
+      </div>
+    </div>
+  );
+}
+
+function AnswerCard({ answer, index }) {
+  const options = Array.isArray(answer.options) ? answer.options : [];
+
+  const selectedOption =
+    answer.selectedOption === null || answer.selectedOption === undefined
+      ? null
+      : Number(answer.selectedOption);
+
+  const correctOption =
+    answer.correctOption === null || answer.correctOption === undefined
+      ? null
+      : Number(answer.correctOption);
+
+  const isAttempted =
+    answer.isAttempted != null
+      ? Boolean(answer.isAttempted)
+      : selectedOption !== null;
+
+  const isCorrect =
+    answer.isCorrect != null
+      ? Boolean(answer.isCorrect)
+      : isAttempted &&
+        correctOption !== null &&
+        selectedOption === correctOption;
+
+  const status = !isAttempted
+    ? "Unanswered"
+    : isCorrect
+      ? "Correct"
+      : "Incorrect";
+
+  const statusStyles = {
+    Correct: "bg-emerald-50 text-emerald-700",
+    Incorrect: "bg-red-50 text-red-700",
+    Unanswered: "bg-slate-100 text-slate-600",
+  };
+
+  const StatusIcon =
+    status === "Correct"
+      ? CheckCircle2
+      : status === "Incorrect"
+        ? XCircle
+        : MinusCircle;
+
+  return (
+    <article className="rounded-2xl border border-slate-200 p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs font-extrabold uppercase tracking-wider text-slate-400">
+          Question {answer.questionNumber || index + 1}
+        </span>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {answer.topic && (
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+              {answer.topic}
+            </span>
+          )}
+
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-bold ${statusStyles[status]}`}
+          >
+            <StatusIcon size={13} />
+            {status}
+          </span>
+        </div>
+      </div>
+
+      <h4 className="mt-4 whitespace-pre-wrap text-sm font-bold leading-6 text-[#172554]">
+        {answer.questionText || "Question text unavailable"}
+      </h4>
+
+      <div className="mt-4 space-y-2">
+        {options.map((option, optionIndex) => {
+          const optionText =
+            typeof option === "string" ? option : option?.text || "";
+
+          const isSelected = selectedOption === optionIndex;
+          const isAnswer = correctOption === optionIndex;
+
+          let optionStyle = "border-slate-200 bg-white text-slate-600";
+
+          if (isAnswer) {
+            optionStyle = "border-emerald-300 bg-emerald-50 text-emerald-800";
+          } else if (isSelected && !isCorrect) {
+            optionStyle = "border-red-300 bg-red-50 text-red-800";
+          }
+
+          return (
+            <div
+              key={optionIndex}
+              className={`flex items-start gap-3 rounded-xl border p-3 text-sm ${optionStyle}`}
+            >
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-white/80 text-xs font-extrabold">
+                {String.fromCharCode(65 + optionIndex)}
+              </span>
+
+              <span className="min-w-0 flex-1 pt-0.5">{optionText}</span>
+
+              <span className="flex shrink-0 items-center gap-1 text-xs font-bold">
+                {isAnswer && (
+                  <>
+                    <Check size={15} />
+                    Correct answer
+                  </>
+                )}
+                {isSelected && !isAnswer && (
+                  <>
+                    <X size={14} />
+                    Your answer
+                  </>
+                )}
+                {isSelected && isAnswer && (
+                  <span className="sr-only">Your answer</span>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 text-xs">
+        <span className="text-slate-500">
+          Your answer:{" "}
+          <strong className="text-slate-700">
+            {isAttempted
+              ? `Option ${String.fromCharCode(65 + selectedOption)}`
+              : "Not answered"}
+          </strong>
+        </span>
+
+        <span className="font-bold text-[#172554]">
+          Marks: {answer.marksAwarded ?? (isCorrect ? answer.marks ?? 0 : 0)} /{" "}
+          {answer.marks ?? 0}
+        </span>
+      </div>
+
+      {answer.explanation && (
+        <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/70 p-4">
+          <p className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-blue-800">
+            <Lightbulb size={15} />
+            Explanation
+          </p>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+            {answer.explanation}
+          </p>
+        </div>
+      )}
+    </article>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Existing dashboard components                                              */
+/* -------------------------------------------------------------------------- */
 
 function PageHeader({ eyebrow, title, description, onRefresh, loading }) {
   return (

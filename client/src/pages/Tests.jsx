@@ -7,12 +7,12 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Send,
   X,
   Trash2,
   PenLine,
   Library,
   CheckCircle2,
+  XCircle,
   AlertCircle,
   Power,
 } from "lucide-react";
@@ -243,16 +243,6 @@ function getErrorMessage(error) {
   );
 }
 
-function getCreatedTestId(data) {
-  const test =
-    data?.test ||
-    data?.data?.test ||
-    data?.data ||
-    data;
-
-  return getId(test);
-}
-
 export default function Tests() {
   const [tests, setTests] = useState([]);
   const [subjects, setSubjects] = useState([]);
@@ -275,6 +265,18 @@ export default function Tests() {
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [successType, setSuccessType] = useState("success");
+
+  // Automatically dismiss toast after 2 seconds.
+  useEffect(() => {
+    if (!success) return undefined;
+
+    const timeoutId = setTimeout(() => {
+      setSuccess("");
+    }, 2000);
+
+    return () => clearTimeout(timeoutId);
+  }, [success]);
 
   const loadTests = useCallback(async () => {
     setLoading(true);
@@ -295,10 +297,7 @@ export default function Tests() {
         params: { status: "active" },
       });
 
-      const data =
-        response.data?.subjects ??
-        response.data?.data ??
-        [];
+      const data = response.data?.subjects ?? response.data?.data ?? [];
 
       setSubjects(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -330,10 +329,7 @@ export default function Tests() {
           },
         });
 
-        const data =
-          response.data?.questions ??
-          response.data?.data ??
-          [];
+        const data = response.data?.questions ?? response.data?.data ?? [];
 
         if (!cancelled) {
           setQuestions(
@@ -382,17 +378,13 @@ export default function Tests() {
     if (!query) return questions;
 
     return questions.filter((question) =>
-      String(question.questionText ?? "")
-        .toLowerCase()
-        .includes(query)
+      String(question.questionText ?? "").toLowerCase().includes(query)
     );
   }, [questions, questionSearch]);
 
   const selectedMarks = useMemo(() => {
     const existingMarks = questions
-      .filter((question) =>
-        form.questionIds.includes(getId(question))
-      )
+      .filter((question) => form.questionIds.includes(getId(question)))
       .reduce(
         (total, question) => total + Number(question.marks || 1),
         0
@@ -414,6 +406,7 @@ export default function Tests() {
     setQuestionMode("manual");
     setError("");
     setSuccess("");
+    setSuccessType("success");
     setShowModal(true);
   }
 
@@ -516,129 +509,121 @@ export default function Tests() {
     );
   }
 
- 
-async function handleCreateTest(event) {
-  event.preventDefault();
-  setError("");
-  setSuccess("");
+  async function handleCreateTest(event) {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
 
-  if (!form.title.trim()) {
-    setError("Test title is required.");
-    return;
-  }
-
-  if (!form.subject) {
-    setError("Please select a subject.");
-    return;
-  }
-
-  if (form.questionIds.length === 0 && manualQuestions.length === 0) {
-    setError("Please add at least one question.");
-    return;
-  }
-
-  const durationMinutes = Number(form.durationMinutes);
-  const attemptsAllowed = Number(form.attemptsAllowed);
-
-  if (
-    !Number.isInteger(durationMinutes) ||
-    durationMinutes < 1 ||
-    durationMinutes > 600
-  ) {
-    setError("Duration must be between 1 and 600 minutes.");
-    return;
-  }
-
-  if (
-    !Number.isInteger(attemptsAllowed) ||
-    attemptsAllowed < 1 ||
-    attemptsAllowed > 10
-  ) {
-    setError("Allowed attempts must be between 1 and 10.");
-    return;
-  }
-
-  const startDate = form.startAt ? new Date(form.startAt) : null;
-  const endDate = form.endAt ? new Date(form.endAt) : null;
-
-  if (startDate && Number.isNaN(startDate.getTime())) {
-    setError("Please select a valid start date.");
-    return;
-  }
-
-  if (endDate && Number.isNaN(endDate.getTime())) {
-    setError("Please select a valid end date.");
-    return;
-  }
-
-  if (startDate && endDate && endDate <= startDate) {
-    setError("End date must be after the start date.");
-    return;
-  }
-
-  const payload = {
-    title: form.title.trim(),
-    description: form.description.trim(),
-    subject: form.subject,
-    questionIds: form.questionIds,
-    manualQuestions: manualQuestions.map((question) => ({
-      questionText: question.questionText,
-      options: question.options.map((text) => ({ text })),
-      correctOption: Number(question.correctOption),
-      explanation: question.explanation,
-      difficulty: question.difficulty,
-      marks: Number(question.marks),
-    })),
-    durationMinutes,
-    attemptsAllowed,
-    startAt: startDate ? startDate.toISOString() : null,
-    endAt: endDate ? endDate.toISOString() : null,
-  };
-
-  setSaving(true);
-
-  try {
-    // Create test only. Do not activate it automatically.
-    const response = await api.post("/tests", payload);
-
-    if (!response.data?.success) {
-      throw new Error(
-        response.data?.message || "Failed to create test."
-      );
+    if (!form.title.trim()) {
+      setError("Test title is required.");
+      return;
     }
 
-    setSuccess("Test created successfully! It is currently deactivated.");
+    if (!form.subject) {
+      setError("Please select a subject.");
+      return;
+    }
 
-    setShowModal(false);
-    setForm(initialForm);
-    setManualQuestions([]);
-    setManualDraft(emptyManualQuestion());
-    setQuestionSearch("");
+    if (form.questionIds.length === 0 && manualQuestions.length === 0) {
+      setError("Please add at least one question.");
+      return;
+    }
 
-    await loadTests();
-  } catch (err) {
-    setError(getErrorMessage(err));
-  } finally {
-    setSaving(false);
+    const durationMinutes = Number(form.durationMinutes);
+    const attemptsAllowed = Number(form.attemptsAllowed);
+
+    if (
+      !Number.isInteger(durationMinutes) ||
+      durationMinutes < 1 ||
+      durationMinutes > 600
+    ) {
+      setError("Duration must be between 1 and 600 minutes.");
+      return;
+    }
+
+    if (
+      !Number.isInteger(attemptsAllowed) ||
+      attemptsAllowed < 1 ||
+      attemptsAllowed > 10
+    ) {
+      setError("Allowed attempts must be between 1 and 10.");
+      return;
+    }
+
+    const startDate = form.startAt ? new Date(form.startAt) : null;
+    const endDate = form.endAt ? new Date(form.endAt) : null;
+
+    if (startDate && Number.isNaN(startDate.getTime())) {
+      setError("Please select a valid start date.");
+      return;
+    }
+
+    if (endDate && Number.isNaN(endDate.getTime())) {
+      setError("Please select a valid end date.");
+      return;
+    }
+
+    if (startDate && endDate && endDate <= startDate) {
+      setError("End date must be after the start date.");
+      return;
+    }
+
+    const payload = {
+      title: form.title.trim(),
+      description: form.description.trim(),
+      subject: form.subject,
+      questionIds: form.questionIds,
+      manualQuestions: manualQuestions.map((question) => ({
+        questionText: question.questionText,
+        options: question.options.map((text) => ({ text })),
+        correctOption: Number(question.correctOption),
+        explanation: question.explanation,
+        difficulty: question.difficulty,
+        marks: Number(question.marks),
+      })),
+      durationMinutes,
+      attemptsAllowed,
+      startAt: startDate ? startDate.toISOString() : null,
+      endAt: endDate ? endDate.toISOString() : null,
+    };
+
+    setSaving(true);
+
+    try {
+      const response = await api.post("/tests", payload);
+
+      if (!response.data?.success) {
+        throw new Error(
+          response.data?.message || "Failed to create test."
+        );
+      }
+
+      setSuccessType("success");
+      setSuccess("Test created successfully! It is currently deactivated.");
+
+      setShowModal(false);
+      setForm(initialForm);
+      setManualQuestions([]);
+      setManualDraft(emptyManualQuestion());
+      setQuestionSearch("");
+
+      await loadTests();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
   }
-}
-
 
   async function handleStatusChange(test) {
     const id = getId(test);
+
+    if (!id || changingStatus || success) return;
+
     const nextStatus =
       test.status === "published" ? "draft" : "published";
 
-    const confirmed = window.confirm(
-      nextStatus === "published"
-        ? `Activate "${test.title}"?`
-        : `Deactivate "${test.title}"?`
-    );
-
-    if (!confirmed) return;
-
     setError("");
-    setSuccess("");
     setChangingStatus(id);
 
     try {
@@ -646,13 +631,24 @@ async function handleCreateTest(event) {
         status: nextStatus,
       });
 
+      // Update only the selected test; avoid reloading the full table.
+      setTests((previous) =>
+        previous.map((item) =>
+          getId(item) === id
+            ? { ...item, status: nextStatus }
+            : item
+        )
+      );
+
+      setSuccessType(
+        nextStatus === "published" ? "success" : "error"
+      );
+
       setSuccess(
         nextStatus === "published"
           ? "Test activated successfully."
           : "Test deactivated successfully."
       );
-
-      await loadTests();
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -665,6 +661,161 @@ async function handleCreateTest(event) {
 
   return (
     <div style={styles.page}>
+      {/* SUCCESS / ERROR TOAST */}
+      {success && (
+        <div
+          key={success}
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "fixed",
+            top: "24px",
+            right: "24px",
+            zIndex: 2000,
+            width: "min(380px, calc(100vw - 32px))",
+            overflow: "hidden",
+            background: "#ffffff",
+            border:
+              successType === "success"
+                ? "1px solid #bbf7d0"
+                : "1px solid #fecaca",
+            borderLeft:
+              successType === "success"
+                ? "4px solid #16a34a"
+                : "4px solid #dc2626",
+            borderRadius: "12px",
+            boxShadow: "0 12px 35px rgba(15, 23, 42, 0.16)",
+            animation: "testPilotToastSlide 2s ease-in-out forwards",
+          }}
+        >
+          <div
+            style={{
+              padding: "15px 18px",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+            }}
+          >
+            <div
+              style={{
+                width: "40px",
+                height: "40px",
+                borderRadius: "50%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                background:
+                  successType === "success" ? "#dcfce7" : "#fee2e2",
+              }}
+            >
+              {successType === "success" ? (
+                <CheckCircle2 size={22} color="#16a34a" />
+              ) : (
+                <XCircle size={22} color="#dc2626" />
+              )}
+            </div>
+
+            <div style={{ flex: 1 }}>
+              <strong
+                style={{
+                  display: "block",
+                  color:
+                    successType === "success" ? "#166534" : "#991b1b",
+                  fontSize: "14px",
+                  marginBottom: "3px",
+                }}
+              >
+                {successType === "success" ? "Success" : "Deactivated"}
+              </strong>
+
+              <span
+                style={{
+                  color: "#475569",
+                  fontSize: "13px",
+                  lineHeight: 1.5,
+                }}
+              >
+                {success}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setSuccess("")}
+              aria-label="Dismiss notification"
+              style={{
+                border: "none",
+                background: "transparent",
+                color: "#64748b",
+                cursor: "pointer",
+                padding: "4px",
+                display: "flex",
+                flexShrink: 0,
+              }}
+            >
+              <X size={17} />
+            </button>
+          </div>
+
+          {/* Horizontal progress line */}
+          <div style={{ height: "4px", background: "#f1f5f9" }}>
+            <div
+              style={{
+                height: "100%",
+                width: "100%",
+                transformOrigin: "left",
+                background:
+                  successType === "success" ? "#16a34a" : "#dc2626",
+                animation: "testPilotToastProgress 2s linear forwards",
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      <style>
+        {`
+          @keyframes testPilotToastSlide {
+            0% {
+              opacity: 0;
+              transform: translateX(120%);
+            }
+
+            15% {
+              opacity: 1;
+              transform: translateX(0);
+            }
+
+            80% {
+              opacity: 1;
+              transform: translateX(0);
+            }
+
+            100% {
+              opacity: 0;
+              transform: translateX(120%);
+            }
+          }
+
+          @keyframes testPilotToastProgress {
+            from {
+              transform: scaleX(1);
+            }
+
+            to {
+              transform: scaleX(0);
+            }
+          }
+
+          @keyframes testPilotSpin {
+            to {
+              transform: rotate(360deg);
+            }
+          }
+        `}
+      </style>
+
       <div style={styles.header}>
         <div>
           <h1 style={styles.title}>Assessments</h1>
@@ -680,7 +831,10 @@ async function handleCreateTest(event) {
             onClick={loadTests}
             disabled={loading}
           >
-            <RefreshCw size={16} />
+            <RefreshCw
+              size={16}
+              style={loading ? { animation: "testPilotSpin 1s linear infinite" } : {}}
+            />
             Refresh
           </button>
 
@@ -707,21 +861,6 @@ async function handleCreateTest(event) {
         >
           <AlertCircle size={15} style={{ verticalAlign: "middle" }} />{" "}
           {error}
-        </div>
-      )}
-
-      {success && (
-        <div
-          role="status"
-          style={{
-            ...styles.alert,
-            background: "#f0fdf4",
-            color: "#166534",
-            border: "1px solid #bbf7d0",
-          }}
-        >
-          <CheckCircle2 size={15} style={{ verticalAlign: "middle" }} />{" "}
-          {success}
         </div>
       )}
 
@@ -1013,9 +1152,7 @@ async function handleCreateTest(event) {
                       )}
 
                       <div style={styles.field}>
-                        <label style={styles.label}>
-                          Question *
-                        </label>
+                        <label style={styles.label}>Question *</label>
                         <textarea
                           style={{
                             ...styles.input,
@@ -1173,20 +1310,26 @@ async function handleCreateTest(event) {
                                     fontSize: "13px",
                                   }}
                                 >
-                                  {question.options.map((option, optionIndex) => (
-                                    <li key={optionIndex}>
-                                      {option}
-                                      {optionIndex === question.correctOption && (
-                                        <strong style={{ color: "#15803d" }}>
-                                          {" "}✓ Correct
-                                        </strong>
-                                      )}
-                                    </li>
-                                  ))}
+                                  {question.options.map(
+                                    (option, optionIndex) => (
+                                      <li key={optionIndex}>
+                                        {option}
+                                        {optionIndex ===
+                                          question.correctOption && (
+                                          <strong
+                                            style={{ color: "#15803d" }}
+                                          >
+                                            {" "}✓ Correct
+                                          </strong>
+                                        )}
+                                      </li>
+                                    )
+                                  )}
                                 </ol>
 
                                 <span style={styles.muted}>
-                                  {question.difficulty} · {question.marks} mark(s)
+                                  {question.difficulty} · {question.marks}{" "}
+                                  mark(s)
                                 </span>
                               </div>
 
@@ -1326,7 +1469,9 @@ async function handleCreateTest(event) {
                   }}
                 >
                   <div>
-                    <strong>{selectedQuestionCount} Questions Selected</strong>
+                    <strong>
+                      {selectedQuestionCount} Questions Selected
+                    </strong>
                     <p style={{ ...styles.muted, margin: "4px 0 0" }}>
                       {form.questionIds.length} from bank ·{" "}
                       {manualQuestions.length} manual
@@ -1372,8 +1517,13 @@ async function handleCreateTest(event) {
                 >
                   {saving ? (
                     <>
-                      <RefreshCw size={15} />
-                      Creating & Activating...
+                      <RefreshCw
+                        size={15}
+                        style={{
+                          animation: "testPilotSpin 1s linear infinite",
+                        }}
+                      />
+                      Creating...
                     </>
                   ) : (
                     <>
@@ -1584,16 +1734,35 @@ async function handleCreateTest(event) {
                               ...(isActive
                                 ? styles.danger
                                 : styles.primary),
+                              opacity:
+                                changingStatus || success ? 0.6 : 1,
+                              cursor:
+                                changingStatus || success
+                                  ? "not-allowed"
+                                  : "pointer",
                             }}
-                            disabled={changingStatus === id}
+                            disabled={
+                              Boolean(changingStatus) || Boolean(success)
+                            }
                             onClick={() => handleStatusChange(test)}
                           >
-                            <Power size={14} />
-                            {changingStatus === id
-                              ? "Updating..."
-                              : isActive
-                                ? "Deactivate"
-                                : "Activate"}
+                            {changingStatus === id ? (
+                              <>
+                                <RefreshCw
+                                  size={14}
+                                  style={{
+                                    animation:
+                                      "testPilotSpin 1s linear infinite",
+                                  }}
+                                />
+                                Updating...
+                              </>
+                            ) : (
+                              <>
+                                <Power size={14} />
+                                {isActive ? "Deactivate" : "Activate"}
+                              </>
+                            )}
                           </button>
                         )}
                       </td>
