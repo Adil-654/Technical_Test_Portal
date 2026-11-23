@@ -31,19 +31,6 @@ const allowedOrigins = [
   "http://localhost:5173",
   "https://testpilot-assessment.vercel.app",
 ];
-
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.log("Blocked CORS origin:", origin);
-      callback(new Error(`Origin not allowed by CORS: ${origin}`));
-    }
-  },
-  credentials: true,
-}));
-
 app.use(
   cors({
     origin: (origin, callback) => {
