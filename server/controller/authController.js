@@ -56,6 +56,17 @@ export async function login(req, res) {
       email: email.trim().toLowerCase(),
     }).select("+password");
 
+
+    console.log("AUTH DEBUG:", {
+  database: User.db.name,
+  collection: User.collection.name,
+  email: email.trim().toLowerCase(),
+  requestedRole: role,
+  userFound: !!user,
+  databaseRole: user?.role,
+  isActive: user?.isActive,
+  passwordSelected: !!user?.password,
+});
     if (
       !user ||
       !user.isActive ||
